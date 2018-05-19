@@ -5,7 +5,7 @@
 # 
 #         USAGE:  ./templates.sh 
 # 
-#   DESCRIPTION:  
+#   DESCRIPTION:  Scripte de base pour l'execution de container applicatif.
 # 
 #       OPTIONS:  ---
 #  REQUIREMENTS:  ---
@@ -20,10 +20,20 @@
 # Jolie mais pas fonctionelle
 # cat /etc/os-release| grep -o -P '(?<=VERSION_ID\=).[0-9]{1,2}(\.[0-9]{1,2})?'
 
+#
+#==========================================================================
+#  This program is free software; you can redistribute it and/or modify 
+#  it under the terms of the GNU General Public License as published by 
+#  the Free Software Foundation; either version 2 of the License, or    
+#  (at your option) any later version.                                  
+#==========================================================================
+#
+
 ## COLORS VARS
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 ## REGEXP VARS
@@ -33,16 +43,31 @@ RE_NUMERIC='^[0-9]+$'
 PS3="Your choice:"
 APP_NAME="APP_SMTP"
 D_TRIGG=false
+
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
 
 function error(){
-	echo -en "${RED}[ERR]$1${NC}\n"
+	echo -en "${RED}[ERR] $1${NC}\n"
 	if test $# -eq 1;then
 		exit 100
 	fi
 	exit $2
+}
+
+function confirm(){
+	SENTENCE=${1:="Are you sure about this ? "}
+	SENTENCE=${SENTENCE}" (yes/no)"
+	echo -en "${BLUE}[?] ${SENTENCE}${NC}\n"
+	select answer in yes no;do
+		case ${answer} in
+			yes)  return 0;;
+			no) return 1;;
+			*) warn "Did not understant your choice !"
+		esac
+	done
+
 }
 
 function info(){
@@ -92,6 +117,10 @@ function REDHAT_PKG_INSTALLED(){
 }
 
 function DO_VARS_SETTINGS(){
+	if test -z ${APP_NAME};then
+		warn "APP_NAME is not set"
+		error "Can't proceed without APP_NAME filename"
+	fi 
 	case "${OS_NAME}" in
 		"ubuntu") PKG_INSTALL="apt install -y"; PKG_QUERY="DEBIAN_PKG_INSTALLED"
 			;;
@@ -127,12 +156,26 @@ function DO_VARS_SETTINGS(){
 
 function PHASE1(){
 	info "PHASE1 Starting"
+	debug "Looking for old container"
+	local APP_NAME_TEST=$(lxc-ls ${APP_NAME})
+	if ! test -z ${APP_NAME_TEST};then
+		confirm "${APP_NAME} found, do you want to erase it ?" && APP_CLEAN 
+		if test ${?} -ne 0;then
+			error "Can't go further"
+		fi
+	fi		
 	info "Creation du container ${APP_NAME}"
 	lxc-create -n ${APP_NAME} -t download -- -d ubuntu -r bionic -a amd64 >/dev/null 2>&1
 	if test ${UID} -eq 0 ;then 
 		LXC_PATH=$(grep -oP '(?<=lxc.lxcpath=).*' /etc/lxc/lxc.conf)
+		if test -z ${LXC_PATH};then
+			LXC_PATH=/var/lib/lxc
+		fi
 	else
 		LXC_PATH=$(grep -oP '(?<=lxc.lxcpath=).*' ${HOME}/.config/lxc/lxc.conf)
+		if test -z ${LXC_PATH};then
+			LXC_PATH=${HOME}/.local/share/lxc
+		fi
 	fi
 	APP_PATH=${LXC_PATH}/${APP_NAME}
 	APP_CONFIG=${APP_PATH}/config
@@ -144,13 +187,72 @@ function PHASE1(){
 		esac
 		echo "${LXC_NET}" >> ${APP_CONFIG}
 	fi
+	sucess "PHASE1 Ended"
+}
+function PHASE2(){
+	info "PHASE2 Starting"
 
 }
 
+function APP_START(){
+	local _APP_NAME=${1:-${APP_NAME}}
+	lxc-start -n ${_APP_NAME} 2>&1 | debug 
+	if test ${PIPESTATUS[0]} -ne 0;then 
+		error "Can't start ${_APP_NAME}"
+	fi
+	info "Started container ${_APP_NAME}"
+	APP_PID=$(lxc-info -n ${_APP_NAME}| grep -i PID | cut -d":" -f2)
+	return 0
+}
+
+function APP_CLOSE(){
+	local _APP_NAME=${1:-${APP_NAME}}
+	lxc-stop -n ${_APP_NAME} 2>&1 | debug
+	if test ${PIPESTATUS[0]} -ne 0;then 
+		error "Can't close ${_APP_NAME}"
+	fi
+	info "Closed container ${_APP_NAME}"
+
+	return 0
+}
+
+function APP_CLEAN(){
+	if test $(APP_STATE) -eq 0;then 
+		APP_CLOSE
+	fi
+	local _APP_NAME=${1:-${APP_NAME}}
+	lxc-destroy -n ${_APP_NAME} 2>&1| debug
+	declare -a PIPCODE
+	PIPECODE=${PIPESTATUS[@]}
+	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
+		error "Can't destroy ${_APP_NAME}"
+		echo ${PIPECODE[0]}
+	fi
+	info "Container ${APP_NAME} destroyed"
+	return 0
+}
+
+function APP_STATE(){
+	local _APP_NAME=${1:-${APP_NAME}}
+	local STATE=$(lxc-info -n ${_APP_NAME} | grep -i "state"| cut -d':' -f 2) 
+	if test ${STATE} = "RUNNING";then
+		echo 0
+		return 0
+	elif test ${STATE} = "STOPPED";then
+		echo 1
+		return 1
+	else
+		warn "Unable to get ${_APP_NAME} state"
+		echo 2
+		return 2
+	fi
+}
+
 function MAIN(){
-GET_INFO
-DO_VARS_SETTINGS
-PHASE1
+	GET_INFO
+	DO_VARS_SETTINGS
+	PHASE1
+	
 }
 
 MAIN
