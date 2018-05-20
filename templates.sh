@@ -47,7 +47,6 @@ D_TRIGG=false
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
-D_TRIGG=true
 
 function error(){
 	echo -en "${RED}[ERR] $1${NC}\n"
@@ -224,18 +223,62 @@ function GET_APP_IP(){
 	return 0
 
 }
+
+function APP_EXEC(){
+	declare -a PIPECODE
+	lxc-attach -n ${APP_NAME} -- ash -c " ${1} " 2>&1 
+	RESULT_CODE=${?}
+	local DONT_FAIL=${2:-false}
+	PIPECODE=(${PIPESTATUS[@]})
+	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141 && test ${DONT_FAIL} != "true" ;then 
+		debug "Commande : ${1}"
+		debug "Result code : ${RESULT_CODE}"
+		error "Execution failed ${APP_NAME}"
+	else
+		debug "Commande : ${1}"
+		debug "Result code : ${RESULT_CODE}"
+		sucess "Execution reussi : ${APP_NAME}" | debug
+	fi
+	unset DONT_FAIL
+	return ${RESULT_CODE}
+
+
+}
+
+function DISPLAY_VARS(){
+	declare -a VARS
+	VARS=( LXC_PATH APP_PATH LXC_NET APP_CONFIG APP_MOUNT_ENTRY LOCAL_MOUNT_ENTRY )
+	for i in ${VARS[@]};do
+		debug "${i}: $(eval echo \$${i})"
+	done
+}
+
+function DEL_CONF(){
+	test $# -ne 2 || { error "Wrong usage of del_conf";	return 1; };
+	GET_CONF ${1} ${2} && sed -i "/${2}/d" || error "Can't find ${2} in ${1}"
+}
+
+function SET_CONF(){
+	test $# -eq 3 || { error "Wrong usage of set_conf";	return 1; };
+  APP_EXEC "grep -vE '^#' ${1} | grep -iq \"${2}\" 2>&1" 0  && { warn "Found same entry for ${2} = ${3}"; } | debug
+	APP_EXEC sed\ -E\ -i\ \'s/\#?${2}.*/${2}="${3}"/\'\ ${1} || error "Set conf failed:
+		FILE : ${1} 
+		VARS : ${2}
+		VALUE: ${3}
+	"
+}
+
+function GET_CONF(){
+	test $# -ne 2 || { error "Wrong usage of get_conf";	return 1; };
+	APP_EXEC "grep -vE '^#' ${1} | grep -iq ${2}" || { echo 1; return 1; };
+	VALUE=$(APP_EXEC "grep -oP "(?<=${2}=).*" ${1}")
+	test -n ${VALUE} && { echo ${VALUE}; return 0; } || { echo 1; return 1; }; 
+}
+
 function PHASE1(){
 	info "PHASE1 Starting"
 	debug "Looking for old container"
 	local APP_NAME_TEST=$(lxc-ls ${APP_NAME})
-	if ! test -z ${APP_NAME_TEST};then
-		confirm "${APP_NAME} found, do you want to erase it ?" && APP_CLEAN 
-		if test ${?} -ne 0;then
-			error "Can't go further"
-		fi
-	fi		
-	info "Creation du container ${APP_NAME}"
-	lxc-create -n ${APP_NAME} -t download -- -d alpine -r 3.7 -a amd64 >/dev/null 2>&1
 	if test ${UID} -eq 0 ;then 
 		LXC_PATH=$(grep -vE '^#' /etc/lxc/lxc.conf | grep -oP '(?<=lxc.lxcpath=).*')
 		if test -z ${LXC_PATH};then
@@ -250,8 +293,22 @@ function PHASE1(){
 	APP_PATH=${LXC_PATH}/${APP_NAME}
 	APP_CONFIG=${APP_PATH}/config
 	APP_ROOTFS=${APP_PATH}/rootfs
-	APP_MOUNT_ENTRY="srv/db"
+	APP_MOUNT_ENTRY="srv/files/"
 	LOCAL_MOUNT_ENTRY="./share_${APP_NAME}"
+
+	if ! test -z ${APP_NAME_TEST};then
+		confirm "${APP_NAME} found, do you want to erase it ?" && APP_CLEAN 
+		if test ${?} -ne 0;then
+			APP_CURRENT=$(grep -oP '(?<=^ID=).*' ${APP_ROOTFS}/etc/os-release)
+			test "${APP_CURRENT}x" = "alpinex" && warn "We're using old APP_SMTP" ||	error "Can't go further, APP_SMTP is not alpine"
+		else
+			info "Creation du container ${APP_NAME}"
+			lxc-create -n ${APP_NAME} -t download -- -d alpine -r 3.7 -a amd64 >/dev/null 2>&1
+		fi
+	else
+		info "Creation du container ${APP_NAME}"
+		lxc-create -n ${APP_NAME} -t download -- -d alpine -r 3.7 -a amd64 >/dev/null 2>&1
+	fi
 	mkdir -p ${LOCAL_MOUNT_ENTRY}
 	if ! test -z ${LXC_IP};then	
 		case "${LXC_VERS}" in
@@ -266,45 +323,11 @@ function PHASE1(){
 	sucess "PHASE1 Ended"
 	DISPLAY_VARS
 }
-function APP_EXEC(){
-	declare -a PIPECODE
-	lxc-attach -n ${APP_NAME} -- ash -c " ${1} " 2>&1 | debug
-	PIPECODE=(${PIPESTATUS[@]})
-	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
-		debug "Commande : ${1}"
-		error "Execution failed ${_APP_NAME}"
-	fi
-	return 0
 
-
-}
-
-function DISPLAY_VARS(){
-	declare -a VARS
-	VARS=( LXC_PATH APP_PATH LXC_NET APP_CONFIG APP_MOUNT_ENTRY LOCAL_MOUNT_ENTRY )
-	for i in ${VARS[@]};do
-		debug "${i}: $(eval echo \$${i})"
-	done
-}
-
-function PHASE2(){
-	info "PHASE2 Starting"
-	info "Doing an update"
-	for i in {1..10};do
-		GET_APP_IP &>/dev/null
-		if test $? -eq 0;then
-			break
-		else 
-			sleep 1
-		fi
-		test ${i} -eq 9 && error "Container don't have any IP address"
-	done
-  APP_EXEC "apk -q update"
-	info "Installing depandencies"
-	APP_EXEC  "apk add dovecot dovecot-sqlite postfix sqlite"
+function DATABASE_CREATION(){
 	SQL_DB_PATH="/srv/db"
 	SQL_DB_NAME="mailuser.db"
-	SQL_DB_FILE=/root/${SQL_DB_NAME}
+	SQL_DB_FILE="${SQL_DB_PATH}/${SQL_DB_NAME}"
 	SQL_CREATE_DATABASE="""
  CREATE TABLE expires (
    username varchar(100) not null,
@@ -330,12 +353,34 @@ CREATE TABLE users (
      active CHAR(1) DEFAULT 'Y' NOT NULL
  );
 	"""
-	debug "REP: ${APP_ROOTFS}${SQL_DB_PATH}/"
 	echo "${SQL_CREATE_DATABASE}" > ${LOCAL_MOUNT_ENTRY}/create.sql
 	info "Database creation"
-	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${SQL_DB_PATH}/create.sql"
+	APP_EXEC "mkdir -p ${SQL_DB_PATH}"
+	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${APP_MOUNT_ENTRY}/create.sql"
+	info "Database created"
 
+}
 
+function PHASE2(){
+	info "PHASE2 Starting"
+	info "Doing an update"
+	for i in {1..10};do
+		GET_APP_IP &>/dev/null
+		if test $? -eq 0;then
+			break
+		else 
+			sleep 1
+		fi
+		test ${i} -eq 9 && error "Container don't have any IP address"
+	done
+  APP_EXEC "apk -q update"
+	info "Installing depandencies"
+	APP_EXEC  "apk add dovecot dovecot-sqlite postfix sqlite"
+  #DATABASE_CREATION
+	DOVE_PATH="/etc/dovecot"
+	DOVE_CONF=${DOVE_PATH}/dovecot.conf
+	SET_CONF ${DOVE_CONF} login_greeting "Welcome to kinkazma"
+	
 }
 
 
