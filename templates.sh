@@ -184,9 +184,9 @@ function APP_CLEAN(){
 	if test $(APP_STATE) -eq 0;then 
 		APP_CLOSE
 	fi
+	declare -a PIPECODE
 	local _APP_NAME=${1:-${APP_NAME}}
 	lxc-destroy -n ${_APP_NAME} 2>&1| debug
-	declare -a PIPECODE
 	PIPECODE=(${PIPESTATUS[@]})
 	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
 		error "Can't destroy ${_APP_NAME}"
@@ -229,8 +229,9 @@ function APP_EXEC(){
 	lxc-attach -n ${APP_NAME} -- ash -c " ${1} " 2>&1 
 	RESULT_CODE=${?}
 	local DONT_FAIL=${2:-false}
-	PIPECODE=(${PIPESTATUS[@]})
-	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141 && test ${DONT_FAIL} != "true" ;then 
+	#PIPECODE=(${PIPESTATUS[@]})
+	#if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141 && test ${DONT_FAIL} != "true" ;then 
+	if test ${RESULT_CODE} -ne 0 && test ${DONT_FAIL} != true;then
 		debug "Commande : ${1}"
 		debug "Result code : ${RESULT_CODE}"
 		error "Execution failed ${APP_NAME}"
@@ -323,6 +324,9 @@ function PHASE1(){
 	sucess "PHASE1 Ended"
 	DISPLAY_VARS
 }
+####
+#  END OF TEMPLATE
+####
 
 function DATABASE_CREATION(){
 	SQL_DB_PATH="/srv/db"
@@ -361,6 +365,7 @@ CREATE TABLE users (
 
 }
 
+
 function PHASE2(){
 	info "PHASE2 Starting"
 	info "Doing an update"
@@ -376,7 +381,7 @@ function PHASE2(){
   APP_EXEC "apk -q update"
 	info "Installing depandencies"
 	APP_EXEC  "apk add dovecot dovecot-sqlite postfix sqlite"
-  #DATABASE_CREATION
+  DATABASE_CREATION
 	DOVE_PATH="/etc/dovecot"
 	DOVE_CONF=${DOVE_PATH}/dovecot.conf
 	SET_CONF ${DOVE_CONF} login_greeting "Welcome to kinkazma"
