@@ -47,6 +47,7 @@ D_TRIGG=false
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
+D_TRIGG=true
 
 function error(){
 	echo -en "${RED}[ERR] $1${NC}\n"
@@ -154,50 +155,12 @@ function DO_VARS_SETTINGS(){
 			
 }
 
-function PHASE1(){
-	info "PHASE1 Starting"
-	debug "Looking for old container"
-	local APP_NAME_TEST=$(lxc-ls ${APP_NAME})
-	if ! test -z ${APP_NAME_TEST};then
-		confirm "${APP_NAME} found, do you want to erase it ?" && APP_CLEAN 
-		if test ${?} -ne 0;then
-			error "Can't go further"
-		fi
-	fi		
-	info "Creation du container ${APP_NAME}"
-	lxc-create -n ${APP_NAME} -t download -- -d ubuntu -r bionic -a amd64 >/dev/null 2>&1
-	if test ${UID} -eq 0 ;then 
-		LXC_PATH=$(grep -oP '(?<=lxc.lxcpath=).*' /etc/lxc/lxc.conf)
-		if test -z ${LXC_PATH};then
-			LXC_PATH=/var/lib/lxc
-		fi
-	else
-		LXC_PATH=$(grep -oP '(?<=lxc.lxcpath=).*' ${HOME}/.config/lxc/lxc.conf)
-		if test -z ${LXC_PATH};then
-			LXC_PATH=${HOME}/.local/share/lxc
-		fi
-	fi
-	APP_PATH=${LXC_PATH}/${APP_NAME}
-	APP_CONFIG=${APP_PATH}/config
-	APP_ROOTFS=${APP_PATH}/rootfs
-	if ! test -z ${LXC_IP};then	
-		case "${LXC_VERS}" in
-			2) LXC_NET="lxc.network.ipv4.address = ${LXC_IP}" ;;
-			3) LXC_NET="lxc.net.0.ipv4.address = ${LXC_IP}" ;;
-		esac
-		echo "${LXC_NET}" >> ${APP_CONFIG}
-	fi
-	sucess "PHASE1 Ended"
-}
-function PHASE2(){
-	info "PHASE2 Starting"
-
-}
-
 function APP_START(){
 	local _APP_NAME=${1:-${APP_NAME}}
+	declare -a PIPECODE
 	lxc-start -n ${_APP_NAME} 2>&1 | debug 
-	if test ${PIPESTATUS[0]} -ne 0;then 
+	PIPECODE=(${PIPESTATUS[@]})
+	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
 		error "Can't start ${_APP_NAME}"
 	fi
 	info "Started container ${_APP_NAME}"
@@ -207,8 +170,10 @@ function APP_START(){
 
 function APP_CLOSE(){
 	local _APP_NAME=${1:-${APP_NAME}}
+	declare -a PIPECODE
 	lxc-stop -n ${_APP_NAME} 2>&1 | debug
-	if test ${PIPESTATUS[0]} -ne 0;then 
+	PIPECODE=(${PIPESTATUS[@]})
+	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
 		error "Can't close ${_APP_NAME}"
 	fi
 	info "Closed container ${_APP_NAME}"
@@ -222,8 +187,8 @@ function APP_CLEAN(){
 	fi
 	local _APP_NAME=${1:-${APP_NAME}}
 	lxc-destroy -n ${_APP_NAME} 2>&1| debug
-	declare -a PIPCODE
-	PIPECODE=${PIPESTATUS[@]}
+	declare -a PIPECODE
+	PIPECODE=(${PIPESTATUS[@]})
 	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
 		error "Can't destroy ${_APP_NAME}"
 		echo ${PIPECODE[0]}
@@ -248,10 +213,137 @@ function APP_STATE(){
 	fi
 }
 
+function GET_APP_IP(){
+	APP_IP=$(lxc-info -n ${APP_NAME} | grep -oP '(?<=IP:).*')
+	if test -z ${APP_IP};then
+		warn "No IP found for ${APP_NAME} container"
+		return 1
+	fi
+	debug "${APP_NAME} IP : ${APP_IP}"
+	echo ${APP_IP}
+	return 0
+
+}
+function PHASE1(){
+	info "PHASE1 Starting"
+	debug "Looking for old container"
+	local APP_NAME_TEST=$(lxc-ls ${APP_NAME})
+	if ! test -z ${APP_NAME_TEST};then
+		confirm "${APP_NAME} found, do you want to erase it ?" && APP_CLEAN 
+		if test ${?} -ne 0;then
+			error "Can't go further"
+		fi
+	fi		
+	info "Creation du container ${APP_NAME}"
+	lxc-create -n ${APP_NAME} -t download -- -d alpine -r 3.7 -a amd64 >/dev/null 2>&1
+	if test ${UID} -eq 0 ;then 
+		LXC_PATH=$(grep -vE '^#' /etc/lxc/lxc.conf | grep -oP '(?<=lxc.lxcpath=).*')
+		if test -z ${LXC_PATH};then
+			LXC_PATH=/var/lib/lxc
+		fi
+	else
+		LXC_PATH=$(grep -vE '^#' ${HOME}/.config/lxc/lxc.conf | grep -oP '(?<=lxc.lxcpath=).*')
+		if test -z ${LXC_PATH};then
+			LXC_PATH=${HOME}/.local/share/lxc
+		fi
+	fi
+	APP_PATH=${LXC_PATH}/${APP_NAME}
+	APP_CONFIG=${APP_PATH}/config
+	APP_ROOTFS=${APP_PATH}/rootfs
+	APP_MOUNT_ENTRY="srv/db"
+	LOCAL_MOUNT_ENTRY="./share_${APP_NAME}"
+	mkdir -p ${LOCAL_MOUNT_ENTRY}
+	if ! test -z ${LXC_IP};then	
+		case "${LXC_VERS}" in
+			2) LXC_NET="lxc.network.ipv4.address = ${LXC_IP}" ;;
+			3) LXC_NET="lxc.net.0.ipv4.address = ${LXC_IP}" ;;
+		esac
+		echo "${LXC_NET}" >> ${APP_CONFIG}
+	fi
+	echo "lxc.mount.entry = $(realpath ${LOCAL_MOUNT_ENTRY}) ${APP_MOUNT_ENTRY} none bind,optional,create=dir 0 0" >> ${APP_CONFIG}
+	info "Starting container"
+	APP_START
+	sucess "PHASE1 Ended"
+	DISPLAY_VARS
+}
+function APP_EXEC(){
+	declare -a PIPECODE
+	lxc-attach -n ${APP_NAME} -- ash -c " ${1} " 2>&1 | debug
+	PIPECODE=(${PIPESTATUS[@]})
+	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
+		debug "Commande : ${1}"
+		error "Execution failed ${_APP_NAME}"
+	fi
+	return 0
+
+
+}
+
+function DISPLAY_VARS(){
+	declare -a VARS
+	VARS=( LXC_PATH APP_PATH LXC_NET APP_CONFIG APP_MOUNT_ENTRY LOCAL_MOUNT_ENTRY )
+	for i in ${VARS[@]};do
+		debug "${i}: $(eval echo \$${i})"
+	done
+}
+
+function PHASE2(){
+	info "PHASE2 Starting"
+	info "Doing an update"
+	for i in {1..10};do
+		GET_APP_IP &>/dev/null
+		if test $? -eq 0;then
+			break
+		else 
+			sleep 1
+		fi
+		test ${i} -eq 9 && error "Container don't have any IP address"
+	done
+  APP_EXEC "apk -q update"
+	info "Installing depandencies"
+	APP_EXEC  "apk add dovecot dovecot-sqlite postfix sqlite"
+	SQL_DB_PATH="/srv/db"
+	SQL_DB_NAME="mailuser.db"
+	SQL_DB_FILE=/root/${SQL_DB_NAME}
+	SQL_CREATE_DATABASE="""
+ CREATE TABLE expires (
+   username varchar(100) not null,
+   mailbox varchar(255) not null,
+   expire_stamp integer not null,
+   primary key (username, mailbox)
+ );
+
+ CREATE TABLE quota (
+   username varchar(100) not null,
+   bytes bigint not null default 0,
+   messages integer not null default 0,
+   primary key (username)
+ );
+
+CREATE TABLE users (
+     username VARCHAR(128) NOT NULL,
+     domain VARCHAR(128) NOT NULL,
+     password VARCHAR(64) NOT NULL,
+     home VARCHAR(255) NOT NULL,
+     uid INTEGER NOT NULL,
+     gid INTEGER NOT NULL,
+     active CHAR(1) DEFAULT 'Y' NOT NULL
+ );
+	"""
+	debug "REP: ${APP_ROOTFS}${SQL_DB_PATH}/"
+	echo "${SQL_CREATE_DATABASE}" > ${LOCAL_MOUNT_ENTRY}/create.sql
+	info "Database creation"
+	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${SQL_DB_PATH}/create.sql"
+
+
+}
+
+
 function MAIN(){
 	GET_INFO
 	DO_VARS_SETTINGS
 	PHASE1
+	PHASE2
 	
 }
 
