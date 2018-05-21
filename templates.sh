@@ -7,19 +7,17 @@
 # 
 #   DESCRIPTION:  Scripte de base pour l'execution de container applicatif.
 # 
-#       OPTIONS:  ---
-#  REQUIREMENTS:  ---
-#          BUGS:  ---
+#       OPTIONS:  -f -q -h -d
+#  REQUIREMENTS:  lxc
+#          BUGS:  Many at the moment.
 #         NOTES:  ---
 #        AUTHOR:  Kazuma Yoshiyuki (), mohamed.ladghem@kinkazma.ga
 #       COMPANY:  KINKAZMA.GA
-#       VERSION:  1.0
+#       VERSION:  0.5
 #       CREATED:  18/05/2018 00:27:31 CEST
 #      REVISION:  ---
 #===============================================================================
-# Jolie mais pas fonctionelle
-# cat /etc/os-release| grep -o -P '(?<=VERSION_ID\=).[0-9]{1,2}(\.[0-9]{1,2})?'
-
+#
 #
 #==========================================================================
 #  This program is free software; you can redistribute it and/or modify 
@@ -28,7 +26,30 @@
 #  (at your option) any later version.                                  
 #==========================================================================
 #
+set -o nounset                                  # treat unset variables as errors
 
+#===============================================================================
+#   GLOBAL DECLARATIONS
+#===============================================================================
+declare -rx SCRIPT=${0##*/}                     # the name of this script
+declare -rx mkdir='/bin/mkdir'                  # the mkdir(1) command
+
+#===============================================================================
+#   SANITY CHECKS
+#===============================================================================
+if [ -z "$BASH" ] ; then
+	printf "$SCRIPT:$LINENO: run this script with the BASH shell\n" >&2
+	exit 192
+fi
+
+if [ ! -x "$mkdir" ] ; then
+	printf "$SCRIPT:$LINENO: command '$mkdir' not available - aborting\n" >&2
+	exit 192
+fi
+trap APP_CLEAN INT TERM
+#===============================================================================
+#   MAIN SCRIPT
+#===============================================================================
 ## COLORS VARS
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
@@ -209,8 +230,25 @@ function APP_CLOSE(){
 }
 
 function APP_CLEAN(){
+	rm -rf ${LOCAL_MOUNT_ENTRY} 2>&1 | debug &&	info "Deleted local files" || warn "Erreur pendant la suppresions de ${LOCAL_MOUNT_ENTRY}"
+	local CREATE_END_TRIGG=false
 	if test $(APP_STATE) -eq 0;then 
 		APP_CLOSE
+	elif $(APP_STATE) -eq 1;then
+		info "${APP_NAME} is not running, cleaning..."
+	else
+		for i in $(seq 1 10);do
+			debug "lxc-create may be in loading"
+			ps -aux|grep lxc-create |grep -v grep | debug
+			if test $? -ne 0;then
+				CREATE_END_TRIGG=true
+				sucess "No lxc-create are running at this stage" | debug
+				break
+			else
+				:
+			fi
+		done
+		test ${CREATE_END_TRIGG} = "false" && kill -9 $(ps -aux|grep lxc-create |grep -v grep | awk '{print $2}') && rm -rf ${APP_PATH} || error "Aborting ! Can't clean old files"
 	fi
 	declare -a PIPECODE
 	local _APP_NAME=${1:-${APP_NAME}}
@@ -309,8 +347,31 @@ function SET_CONF(){
 		VALUE: ${3}
 	"
 	GET_CONF ${1} ${2} &>/dev/null || APP_EXEC "echo \"${2}=${3}\" >> ${1} "
-	sucess "Added ${2} from ${1}" | debug
+	sucess "Added ${2}=${3} from ${1}" | debug
 }
+
+function COMMENT_CONF(){
+	test $# -eq 2 || { error "Wrong usage of comment_conf";	return 1; };
+	APP_EXEC sed\ -E\ -i\ \'s/${2}.*/\#${2}/\'\ ${1} || error "comment conf failed:
+		FILE : ${1} 
+		VARS : ${2}
+		VALUE: ${3}
+	"
+	sucess "Commented ${2} from ${1}" | debug
+
+}
+
+function ADD_CONF(){
+	test $# -eq 2 || { error "Wrong usage of add_conf";	return 1; };
+	GET_CONF ${1} ${2} &>/dev/null || APP_EXEC "echo \"${2}\" >> ${1} " || error "add conf failed:
+		FILE : ${1} 
+		VARS : ${2}
+		VALUE: ${3}
+	"
+	sucess "Add conf ${2} from ${1}"
+
+}
+
 
 function PHASE1(){
 	info "PHASE1 Starting"
@@ -421,14 +482,14 @@ function PHASE2(){
 	APP_EXEC  "apk add dovecot dovecot-sqlite postfix sqlite"
   DATABASE_CREATION
 	DOVE_PATH="/etc/dovecot"
-	DOVE_CONF=${DOVE_PATH}/dovecot.conf
-	SET_CONF ${DOVE_CONF} login_greeting "Welcome to kinkazma"
-	GET_CONF ${DOVE_CONF} login_greeting
-	DEL_CONF ${DOVE_CONF} login_greeting
-
-	
+	DOVE_PATH_CONF="${DOVE_PATH}/conf.d"
+	DOVE_MAIN_CONF="${DOVE_PATH}/dovecot.conf"
+	DOVE_AUTH_CONF="${DOVE_PATH_CONF}/10-auth.conf"
+	DOVE_MAIL_CONF="${DOVE_PATH_CONF}/10-mail.conf"
+	SET_CONF ${DOVE_MAIN_CONF} login_greeting "Welcome to kinkazma"
+	SET_CONF ${DOVE_MAIN_CONF} protocols "imap lmtp"
+	SET_CONF ${DOVE_MAIN_CONF} listen "127.0.0.1"
 }
-
 
 function MAIN(){
 	GET_INFO
@@ -450,4 +511,12 @@ done
 
 
 MAIN
+
+#===============================================================================
+#   STATISTICS / CLEANUP
+#===============================================================================
 exit 0
+
+
+
+
