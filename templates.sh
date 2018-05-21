@@ -39,14 +39,26 @@ NC='\033[0m'
 ## REGEXP VARS
 RE_NUMERIC='^[0-9]+$'
 
-## SHELL RUNTIME
+## DEFAULT VALUES 
 PS3="Your choice:"
 APP_NAME="APP_SMTP"
-D_TRIGG=true
 
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
+
+## SOME VARS
+HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de container applicatifs
+
+	-h 	-	Show this help.
+	-f	-	Force creation of container.
+	-d	-	Debug mode.
+	-q	-	Quiet mode. (Assume -f)
+
+	Created by Kinkazma - www.kinkazma.ml
+"""
+F_TRIGG=false
+D_TRIGG=false
 
 function error(){
 	echo -en "${RED}[ERR] $1${NC}\n"
@@ -56,7 +68,15 @@ function error(){
 	exit $2
 }
 
+function quiet(){
+	exec &>/dev/null
+	F_TRIGG=true
+}
+
 function confirm(){
+	if test ${F_TRIGG} = "true";then
+		return 0
+	fi
 	SENTENCE=${1:="Are you sure about this ? "}
 	SENTENCE=${SENTENCE}" (yes/no)"
 	echo -en "${BLUE}[?] ${SENTENCE}${NC}\n"
@@ -69,6 +89,7 @@ function confirm(){
 	done
 
 }
+
 
 function info(){
 	echo -en "\033[1m[-] ${1}${NC}\n"
@@ -263,7 +284,7 @@ function DISPLAY_VARS(){
 
 function GET_CONF(){
 	test $# -eq 2 || { error "Wrong usage of get_conf";	return 1; };
-	APP_EXEC "grep -vE '^#' ${1} | grep -iq ${2}" true || { echo 1; return 1; };
+	APP_EXEC "grep -v -E \"^#\" ${1} | grep -i -q \"${2}\"" true || return 1; 
 	VALUE=$(APP_EXEC "grep  \"${2}\" ${1} | cut -d'=' -f2 " true)
 	if ! test -z "${VALUE}";then
 		echo ${VALUE}; 
@@ -275,7 +296,8 @@ function GET_CONF(){
 
 function DEL_CONF(){
 	test $# -eq 2 || { error "Wrong usage of del_conf";	return 1; };
-	GET_CONF ${1} ${2} && APP_EXEC "sed -i \"/${2}/d\" ${1}" || error "Can't find ${2} in ${1}"
+	GET_CONF ${1} ${2} &>/dev/null && APP_EXEC "sed -i \"/${2}/d\" ${1}" || error "Can't find ${2} in ${1}"
+	sucess "Deleted ${2} from ${1}" | debug
 }
 
 function SET_CONF(){
@@ -286,6 +308,8 @@ function SET_CONF(){
 		VARS : ${2}
 		VALUE: ${3}
 	"
+	GET_CONF ${1} ${2} &>/dev/null || APP_EXEC "echo \"${2}=${3}\" >> ${1} "
+	sucess "Added ${2} from ${1}" | debug
 }
 
 function PHASE1(){
@@ -314,6 +338,7 @@ function PHASE1(){
 		if test ${?} -ne 0;then
 			APP_CURRENT=$(grep -oP '(?<=^ID=).*' ${APP_ROOTFS}/etc/os-release )
 			test "${APP_CURRENT}x" = "alpinex" && warn "We're using old APP_SMTP" ||	error "Can't go further, APP_SMTP is not alpine"
+
 		else
 			APP_CREATE
 		fi
@@ -334,11 +359,14 @@ function PHASE1(){
 	sucess "PHASE1 Ended"
 	DISPLAY_VARS
 }
+
+
 ####
 #  END OF TEMPLATE
 ####
 
 function DATABASE_CREATION(){
+
 	SQL_DB_PATH="/srv/db"
 	SQL_DB_NAME="mailuser.db"
 	SQL_DB_FILE="${SQL_DB_PATH}/${SQL_DB_NAME}"
@@ -409,6 +437,17 @@ function MAIN(){
 	PHASE2
 	
 }
+
+while getopts "hfdq" COMMANDES;do
+	case "${COMMANDES}" in
+		f) F_TRIGG=true;;
+		h) info "${HELP}";exit 0;;
+		d) D_TRIGG=true;;
+		q)  quiet ;;
+		*) error "Can't procceed this argument";;
+	esac
+done
+
 
 MAIN
 exit 0
