@@ -42,7 +42,7 @@ RE_NUMERIC='^[0-9]+$'
 ## SHELL RUNTIME
 PS3="Your choice:"
 APP_NAME="APP_SMTP"
-D_TRIGG=false
+D_TRIGG=true
 
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
@@ -148,12 +148,19 @@ function DO_VARS_SETTINGS(){
 	if ! test -r . ;then
 		error "Can't write here"
 	fi
-	if test $(df . --output=pcent |tail -n1|sed 's/%//') -gt 95;then
+		
+}
+function APP_CREATE(){
+	local APP_DISTRIB_ID="alpine"
+	local APP_DISTRIB_VERS="3.7"
+ 	local APP_DISTRIB_ARCH="amd64"
+	if test $(df ${LXC_PATH} --output=pcent |tail -n1|sed 's/%//') -gt 95;then
 		warn "Near to hit the no more space avaible (>95%)"
 	fi
-			
+	info "Creation du container"
+	lxc-create -n ${APP_NAME} -t download -- -d ${APP_DISTRIB_ID} -r ${APP_DISTRIB_VERS} -a ${APP_DISTRIB_ARCH} >/dev/null 2>&1 | debug
+	return $?	
 }
-
 function APP_START(){
 	local _APP_NAME=${1:-${APP_NAME}}
 	declare -a PIPECODE
@@ -226,7 +233,7 @@ function GET_APP_IP(){
 
 function APP_EXEC(){
 	declare -a PIPECODE
-	lxc-attach -n ${APP_NAME} -- ash -c " ${1} " 2>&1 
+	lxc-attach -n ${APP_NAME} -- ash -c " ${1} " 2>&1  
 	RESULT_CODE=${?}
 	local DONT_FAIL=${2:-false}
 	#PIPECODE=(${PIPESTATUS[@]})
@@ -254,26 +261,31 @@ function DISPLAY_VARS(){
 	done
 }
 
+function GET_CONF(){
+	test $# -eq 2 || { error "Wrong usage of get_conf";	return 1; };
+	APP_EXEC "grep -vE '^#' ${1} | grep -iq ${2}" true || { echo 1; return 1; };
+	VALUE=$(APP_EXEC "grep  \"${2}\" ${1} | cut -d'=' -f2 " true)
+	if ! test -z "${VALUE}";then
+		echo ${VALUE}; 
+		return 0;   
+	else 
+		 return 1
+	fi
+}
+
 function DEL_CONF(){
-	test $# -ne 2 || { error "Wrong usage of del_conf";	return 1; };
-	GET_CONF ${1} ${2} && sed -i "/${2}/d" || error "Can't find ${2} in ${1}"
+	test $# -eq 2 || { error "Wrong usage of del_conf";	return 1; };
+	GET_CONF ${1} ${2} && APP_EXEC "sed -i \"/${2}/d\" ${1}" || error "Can't find ${2} in ${1}"
 }
 
 function SET_CONF(){
 	test $# -eq 3 || { error "Wrong usage of set_conf";	return 1; };
-  APP_EXEC "grep -vE '^#' ${1} | grep -iq \"${2}\" 2>&1" 0  && { warn "Found same entry for ${2} = ${3}"; } | debug
+  APP_EXEC "grep -vE '^#' ${1} | grep -iq \"${2}\" 2>&1" true  && { warn "Found same entry for ${2} = ${3}"; } | debug
 	APP_EXEC sed\ -E\ -i\ \'s/\#?${2}.*/${2}="${3}"/\'\ ${1} || error "Set conf failed:
 		FILE : ${1} 
 		VARS : ${2}
 		VALUE: ${3}
 	"
-}
-
-function GET_CONF(){
-	test $# -ne 2 || { error "Wrong usage of get_conf";	return 1; };
-	APP_EXEC "grep -vE '^#' ${1} | grep -iq ${2}" || { echo 1; return 1; };
-	VALUE=$(APP_EXEC "grep -oP "(?<=${2}=).*" ${1}")
-	test -n ${VALUE} && { echo ${VALUE}; return 0; } || { echo 1; return 1; }; 
 }
 
 function PHASE1(){
@@ -300,15 +312,13 @@ function PHASE1(){
 	if ! test -z ${APP_NAME_TEST};then
 		confirm "${APP_NAME} found, do you want to erase it ?" && APP_CLEAN 
 		if test ${?} -ne 0;then
-			APP_CURRENT=$(grep -oP '(?<=^ID=).*' ${APP_ROOTFS}/etc/os-release)
+			APP_CURRENT=$(grep -oP '(?<=^ID=).*' ${APP_ROOTFS}/etc/os-release )
 			test "${APP_CURRENT}x" = "alpinex" && warn "We're using old APP_SMTP" ||	error "Can't go further, APP_SMTP is not alpine"
 		else
-			info "Creation du container ${APP_NAME}"
-			lxc-create -n ${APP_NAME} -t download -- -d alpine -r 3.7 -a amd64 >/dev/null 2>&1
+			APP_CREATE
 		fi
 	else
-		info "Creation du container ${APP_NAME}"
-		lxc-create -n ${APP_NAME} -t download -- -d alpine -r 3.7 -a amd64 >/dev/null 2>&1
+		APP_CREATE
 	fi
 	mkdir -p ${LOCAL_MOUNT_ENTRY}
 	if ! test -z ${LXC_IP};then	
@@ -360,7 +370,7 @@ CREATE TABLE users (
 	echo "${SQL_CREATE_DATABASE}" > ${LOCAL_MOUNT_ENTRY}/create.sql
 	info "Database creation"
 	APP_EXEC "mkdir -p ${SQL_DB_PATH}"
-	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${APP_MOUNT_ENTRY}/create.sql"
+	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${APP_MOUNT_ENTRY}/create.sql 2>/dev/null" true
 	info "Database created"
 
 }
@@ -385,6 +395,9 @@ function PHASE2(){
 	DOVE_PATH="/etc/dovecot"
 	DOVE_CONF=${DOVE_PATH}/dovecot.conf
 	SET_CONF ${DOVE_CONF} login_greeting "Welcome to kinkazma"
+	GET_CONF ${DOVE_CONF} login_greeting
+	DEL_CONF ${DOVE_CONF} login_greeting
+
 	
 }
 
