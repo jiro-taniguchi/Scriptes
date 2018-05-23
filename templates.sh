@@ -26,7 +26,7 @@
 #  (at your option) any later version.                                  
 #==========================================================================
 #
-#set -o nounset                                  # treat unset variables as errors
+set -o nounset                                  # treat unset variables as errors
 
 #===============================================================================
 #   GLOBAL DECLARATIONS
@@ -46,7 +46,7 @@ if [ ! -x "$mkdir" ] ; then
 	printf "$SCRIPT:$LINENO: command '$mkdir' not available - aborting\n" >&2
 	exit 192
 fi
-trap APP_CLEAN INT TERM
+trap EXIT_ON_INT INT TERM
 #===============================================================================
 #   MAIN SCRIPT
 #===============================================================================
@@ -248,7 +248,10 @@ function APP_CLEAN(){
 				sleep 1
 			fi
 		done
-		test ${CREATE_END_TRIGG} = "false" && kill -9 $(ps -aux|grep lxc-create |grep -v grep | awk '{print $2}') && rm -rf ${APP_PATH} || error "Aborting ! Can't clean old files"
+		if test ${CREATE_END_TRIGG} = "false";then
+			LXC_CREATE_PID=$(ps -aux|grep lxc-create |grep -v grep | awk '{print $2}')
+			! test -z ${LXC_CREATE_PID} && rm -rf ${APP_PATH} || error "Aborting ! Can't clean old files"
+		fi
 	fi
 	declare -a PIPECODE
 	local _APP_NAME=${1:-${APP_NAME}}
@@ -261,18 +264,22 @@ function APP_CLEAN(){
 	info "Container ${APP_NAME} destroyed"
 	return 0
 }
+function EXIT_ON_INT(){
+	APP_CLEAN || warn "Somthing went wrong during cleaning"
+	exit $?
+}
 
 function APP_STATE(){
 	local _APP_NAME=${1:-${APP_NAME}}
-	local STATE=$(lxc-info -n ${_APP_NAME} | grep -i "state"| cut -d':' -f 2) 
-	if test ${STATE} = "RUNNING";then
+	local STATE=$(lxc-info -n ${_APP_NAME} 2>/dev/null | grep -i "state"| cut -d':' -f 2|tr -d " ") 
+	if test "${STATE}x" = "RUNNINGx";then
 		echo 0
 		return 0
-	elif test ${STATE} = "STOPPED";then
+	elif test "${STATE}x" = "STOPPEDx";then
 		echo 1
 		return 1
 	else
-		warn "Unable to get ${_APP_NAME} state"
+		warn "Unable to get ${_APP_NAME} state"| debug
 		echo 2
 		return 2
 	fi
