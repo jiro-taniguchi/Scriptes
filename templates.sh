@@ -26,7 +26,7 @@
 #  (at your option) any later version.                                  
 #==========================================================================
 #
-set -o nounset                                  # treat unset variables as errors
+#set -o nounset                                  # treat unset variables as errors
 
 #===============================================================================
 #   GLOBAL DECLARATIONS
@@ -245,7 +245,7 @@ function APP_CLEAN(){
 				sucess "No lxc-create are running at this stage" | debug
 				break
 			else
-				:
+				sleep 1
 			fi
 		done
 		test ${CREATE_END_TRIGG} = "false" && kill -9 $(ps -aux|grep lxc-create |grep -v grep | awk '{print $2}') && rm -rf ${APP_PATH} || error "Aborting ! Can't clean old files"
