@@ -67,7 +67,7 @@ APP_NAME="APP_SMTP"
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
-
+LXC_NET=""
 ## SOME VARS
 HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de container applicatifs
 
@@ -234,7 +234,7 @@ function APP_CLEAN(){
 	local CREATE_END_TRIGG=false
 	if test $(APP_STATE) -eq 0;then 
 		APP_CLOSE
-	elif $(APP_STATE) -eq 1;then
+	elif test $(APP_STATE) -eq 1;then
 		info "${APP_NAME} is not running, cleaning..."
 	else
 		for i in $(seq 1 10);do
@@ -378,12 +378,12 @@ function PHASE1(){
 	debug "Looking for old container"
 	local APP_NAME_TEST=$(lxc-ls ${APP_NAME})
 	if test ${UID} -eq 0 ;then 
-		LXC_PATH=$(grep -vE '^#' /etc/lxc/lxc.conf | grep -oP '(?<=lxc.lxcpath=).*')
+		LXC_PATH=$(grep -vE '^#' /etc/lxc/lxc.conf | grep lxc.lxcpath | cut -d"=" -f 2)
 		if test -z ${LXC_PATH};then
 			LXC_PATH=/var/lib/lxc
 		fi
 	else
-		LXC_PATH=$(grep -vE '^#' ${HOME}/.config/lxc/lxc.conf | grep -oP '(?<=lxc.lxcpath=).*')
+		LXC_PATH=$(grep -vE '^#' ${HOME}/.config/lxc/lxc.conf | grep lxc.lxcpath | cut -d"=" -f 2)
 		if test -z ${LXC_PATH};then
 			LXC_PATH=${HOME}/.local/share/lxc
 		fi
@@ -422,9 +422,9 @@ function PHASE1(){
 }
 
 
-####
+####----------------------------------------
 #  END OF TEMPLATE
-####
+####----------------------------------------
 
 function DATABASE_CREATION(){
 
@@ -477,10 +477,10 @@ function PHASE2(){
 		fi
 		test ${i} -eq 9 && error "Container don't have any IP address"
 	done
-  APP_EXEC "apk -q update"
+	APP_EXEC "apk -q update"
 	info "Installing depandencies"
 	APP_EXEC  "apk add dovecot dovecot-sqlite postfix sqlite"
-  DATABASE_CREATION
+	DATABASE_CREATION
 	DOVE_PATH="/etc/dovecot"
 	DOVE_PATH_CONF="${DOVE_PATH}/conf.d"
 	DOVE_MAIN_CONF="${DOVE_PATH}/dovecot.conf"
