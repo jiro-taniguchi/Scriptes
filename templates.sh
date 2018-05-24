@@ -27,7 +27,6 @@
 #==========================================================================
 #
 set -o nounset                                  # treat unset variables as errors
-
 #===============================================================================
 #   GLOBAL DECLARATIONS
 #===============================================================================
@@ -46,6 +45,8 @@ if [ ! -x "$mkdir" ] ; then
 	printf "$SCRIPT:$LINENO: command '$mkdir' not available - aborting\n" >&2
 	exit 192
 fi
+stty -echo
+
 trap EXIT_ON_INT INT TERM
 #===============================================================================
 #   MAIN SCRIPT
@@ -95,6 +96,7 @@ function quiet(){
 }
 
 function confirm(){
+	stty echo
 	if test ${F_TRIGG} = "true";then
 		return 0
 	fi
@@ -108,7 +110,7 @@ function confirm(){
 			*) warn "Did not understant your choice !"
 		esac
 	done
-
+	stty -echo
 }
 
 
@@ -122,6 +124,7 @@ function warn(){
 	echo -en "${YELLOW}[!] $1${NC}\n"
 }
 function debug(){
+	set +o nounset
   if test ${D_TRIGG} = true;then
     if [ -n "$1" ];then
       INPUT="$1"
@@ -310,8 +313,7 @@ function APP_EXEC(){
 		error "Execution failed ${APP_NAME}"
 	else
 		debug "Commande : ${1}"
-		debug "Result code : ${RESULT_CODE}"
-		sucess "Execution reussi : ${APP_NAME}" | debug
+		sucess "Result code : ${RESULT_CODE}"| debug
 	fi
 	unset DONT_FAIL
 	return ${RESULT_CODE}
@@ -341,7 +343,7 @@ function GET_CONF(){
 
 function DEL_CONF(){
 	test $# -eq 2 || { error "Wrong usage of del_conf";	return 1; };
-	GET_CONF ${1} ${2} &>/dev/null && APP_EXEC "sed -i \"/${2}/d\" ${1}" || error "Can't find ${2} in ${1}"
+	GET_CONF ${1} "${2}" &>/dev/null && APP_EXEC "sed -i \"/${2}/d\" ${1}" || error "Can't find ${2} in ${1}" | debug
 	sucess "Deleted ${2} from ${1}" | debug
 }
 
@@ -362,7 +364,6 @@ function COMMENT_CONF(){
 	APP_EXEC sed\ -E\ -i\ \'s/${2}.*/\#${2}/\'\ ${1} || error "comment conf failed:
 		FILE : ${1} 
 		VARS : ${2}
-		VALUE: ${3}
 	"
 	sucess "Commented ${2} from ${1}" | debug
 
@@ -370,12 +371,11 @@ function COMMENT_CONF(){
 
 function ADD_CONF(){
 	test $# -eq 2 || { error "Wrong usage of add_conf";	return 1; };
-	GET_CONF ${1} ${2} &>/dev/null || APP_EXEC "echo \"${2}\" >> ${1} " || error "add conf failed:
+	GET_CONF ${1} "${2}" &>/dev/null || APP_EXEC "echo \"${2}\" >> ${1} " || error "add conf failed:
 		FILE : ${1} 
 		VARS : ${2}
-		VALUE: ${3}
 	"
-	sucess "Add conf ${2} from ${1}"
+	sucess "Add conf ${2} from ${1}" | debug
 
 }
 
@@ -496,6 +496,8 @@ function PHASE2(){
 	SET_CONF ${DOVE_MAIN_CONF} login_greeting "Welcome to kinkazma"
 	SET_CONF ${DOVE_MAIN_CONF} protocols "imap lmtp"
 	SET_CONF ${DOVE_MAIN_CONF} listen "127.0.0.1"
+	ADD_CONF ${DOVE_AUTH_CONF} "!include auth-sql.conf.ext"
+	DEL_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
 }
 
 function MAIN(){
