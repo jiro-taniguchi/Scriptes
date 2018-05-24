@@ -64,7 +64,7 @@ RE_NUMERIC='^[0-9]+$'
 ## DEFAULT VALUES 
 PS3="Your choice:"
 APP_NAME="APP_SMTP"
-
+HIDE="&>/dev/null"
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
@@ -302,9 +302,9 @@ function GET_APP_IP(){
 
 function APP_EXEC(){
 	declare -a PIPECODE
-	lxc-attach -n ${APP_NAME} -- ash -c " ${1} " 2>&1  
-	RESULT_CODE=${?}
 	local DONT_FAIL=${2:-false}
+	lxc-attach -n ${APP_NAME} -- ash -c " ${1} ${HIDE} " # | debug
+	RESULT_CODE=${?}
 	#PIPECODE=(${PIPESTATUS[@]})
 	#if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141 && test ${DONT_FAIL} != "true" ;then 
 	if test ${RESULT_CODE} -ne 0 && test ${DONT_FAIL} != true;then
@@ -508,16 +508,32 @@ function MAIN(){
 	
 }
 
+#===============================================================================
+#   ARGUMENT PARSING
+#===============================================================================
+
 while getopts "hfdq" COMMANDES;do
 	case "${COMMANDES}" in
 		f) F_TRIGG=true;;
 		h) info "${HELP}";exit 0;;
-		d) D_TRIGG=true;;
-		q)  quiet ;;
+		d) D_TRIGG=true;HIDE="";;
+		q) Q_TRIGG=true;;
 		*) error "Can't procceed this argument";;
 	esac
 done
 
+if test ${Q_TRIGG} = true && test ${D_TRIGG} = true;then
+	warn "Can't put those argument together"
+	exit 1
+fi
+
+if test ${Q_TRIGG} = true;then
+	quiet
+fi
+
+#===============================================================================
+#   MAIN LAUNCH
+#===============================================================================
 
 MAIN
 
