@@ -64,7 +64,7 @@ RE_NUMERIC='^[0-9]+$'
 ## DEFAULT VALUES 
 PS3="Your choice:"
 APP_NAME="APP_SMTP"
-HIDE="&>/dev/null"
+HIDE=' >/dev/null 2>&1'
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
@@ -81,7 +81,7 @@ HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de 
 """
 F_TRIGG=false
 D_TRIGG=false
-
+Q_TRIGG=false
 function error(){
 	echo -en "${RED}[ERR] $1${NC}\n"
 	if test $# -eq 1;then
@@ -95,6 +95,13 @@ function quiet(){
 	F_TRIGG=true
 }
 
+function silent(){
+	if test ${D_TRIGG} != "true"; then
+		"${@}" >/dev/null 2>&1
+	else
+		"${@}"
+	fi
+}
 function confirm(){
 	stty echo
 	if test ${F_TRIGG} = "true";then
@@ -208,10 +215,11 @@ function APP_CREATE(){
 }
 function APP_START(){
 	local _APP_NAME=${1:-${APP_NAME}}
+	local RESULT_CODE
 	declare -a PIPECODE
-	lxc-start -n ${_APP_NAME} 2>&1 | debug 
-	PIPECODE=(${PIPESTATUS[@]})
-	if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141;then 
+	silent lxc-start -n ${_APP_NAME}  
+	RESULT_CODE=$?
+	if test ${RESULT_CODE} -ne 0 ;then 
 		error "Can't start ${_APP_NAME}"
 	fi
 	info "Started container ${_APP_NAME}"
@@ -291,7 +299,7 @@ function APP_STATE(){
 function GET_APP_IP(){
 	APP_IP=$(lxc-info -n ${APP_NAME} | grep -oP '(?<=IP:).*')
 	if test -z ${APP_IP};then
-		warn "No IP found for ${APP_NAME} container"
+		warn "No IP found for ${APP_NAME} container" | debug
 		return 1
 	fi
 	debug "${APP_NAME} IP : ${APP_IP}"
@@ -303,7 +311,7 @@ function GET_APP_IP(){
 function APP_EXEC(){
 	declare -a PIPECODE
 	local DONT_FAIL=${2:-false}
-	lxc-attach -n ${APP_NAME} -- ash -c " ${1} ${HIDE} " # | debug
+	silent lxc-attach -n ${APP_NAME} -- ash -c " ${1} "
 	RESULT_CODE=${?}
 	#PIPECODE=(${PIPESTATUS[@]})
 	#if test ${PIPECODE[0]} -ne 0 && test ${PIPECODE[0]} -ne 141 && test ${DONT_FAIL} != "true" ;then 
@@ -476,7 +484,7 @@ function PHASE2(){
 	info "PHASE2 Starting"
 	info "Doing an update"
 	for i in {1..10};do
-		GET_APP_IP &>/dev/null
+		GET_APP_IP 
 		if test $? -eq 0;then
 			break
 		else 
