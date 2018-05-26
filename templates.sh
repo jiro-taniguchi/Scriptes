@@ -343,12 +343,15 @@ function DISPLAY_VARS(){
 function GET_CONF(){
 	test $# -eq 2 || { error "Wrong usage of get_conf";	return 1; };
 	APP_EXEC "grep -v -E \"^#\" ${1} | grep -i -q \"${2}\"" true || return 1; 
+	EXIST=$(APP_EXEC "grep  \"${2}\" ${1}|tail -n 1 " true)
 	VALUE=$(APP_EXEC "grep  \"${2}\" ${1}|tail -n 1 | cut -d'=' -f2 " true)
 	if ! test -z "${VALUE}";then
 		echo ${VALUE}; 
 		return 0;   
-	else 
-		 return 1
+	elif test -n ${EXIST};then
+		 return 0
+	else
+		return 1
 	fi
 }
 
@@ -378,7 +381,7 @@ function SET_CONF(){
 function COMMENT_CONF(){
 	test $# -eq 2 || { error "Wrong usage of comment_conf";	return 1; };
 	#APP_EXEC sed\ -E\ -i\ \'s/${2}.*/\#${2}/\'\ ${1} 
-	APP_EXEC sed\ -E\ -i\ \'/${2}.*/\{s//\#${2}/\;h\}\;\${x\;/./\{x\;q0\}\;x\;q1\}\' ${1} || 	error "comment conf failed:
+	APP_EXEC sed\ -E\ -i\ \'/"^${2}"/\{s//\#"${2}"/\;h\}\;\${x\;/./\{x\;q0\}\;x\;q1\}\'\ ${1} || 	error "comment conf failed:
 		FILE : ${1} 
 		VARS : ${2}
 	"
@@ -532,7 +535,7 @@ function PHASE2(){
 	SET_CONF ${DOVE_MAIN_CONF} protocols "imap lmtp"
 	SET_CONF ${DOVE_MAIN_CONF} listen "127.0.0.1"
 	ADD_CONF ${DOVE_AUTH_CONF} "!include auth-sql.conf.ext"
-	DEL_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
+	COMMENT_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
 	APP_EXEC "service dovecot start &"
 }
 
