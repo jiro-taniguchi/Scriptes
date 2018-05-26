@@ -69,6 +69,8 @@ HIDE=' >/dev/null 2>&1'
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
 LXC_NET=""
+APP_DEPENDENCIES="dovecot dovecot-sqlite postfix sqlite"
+
 ## SOME VARS
 HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de container applicatifs
 
@@ -76,6 +78,7 @@ HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de 
 	-f	-	Force creation of container.
 	-d	-	Debug mode.
 	-q	-	Quiet mode. (Assume -f)
+	-m	-	Config file for setconf and addconf (not mandatory if phases have been setted)
 
 	Created by Kinkazma - www.kinkazma.ml
 """
@@ -340,7 +343,7 @@ function DISPLAY_VARS(){
 function GET_CONF(){
 	test $# -eq 2 || { error "Wrong usage of get_conf";	return 1; };
 	APP_EXEC "grep -v -E \"^#\" ${1} | grep -i -q \"${2}\"" true || return 1; 
-	VALUE=$(APP_EXEC "grep  \"${2}\" ${1} | cut -d'=' -f2 " true)
+	VALUE=$(APP_EXEC "grep  \"${2}\" ${1}|tail -n 1 | cut -d'=' -f2 " true)
 	if ! test -z "${VALUE}";then
 		echo ${VALUE}; 
 		return 0;   
@@ -357,19 +360,25 @@ function DEL_CONF(){
 
 function SET_CONF(){
 	test $# -eq 3 || { error "Wrong usage of set_conf";	return 1; };
-  APP_EXEC "grep -vE '^#' ${1} | grep -iq \"${2}\" 2>&1" true  && { warn "Found same entry for ${2} = ${3}"; } | debug
-	APP_EXEC sed\ -E\ -i\ \'s/\#?${2}.*/${2}="${3}"/\'\ ${1} || error "Set conf failed:
+  APP_EXEC " grep -iq \"${2}\" ${1} 2>&1" true
+	if test ${?} -eq 0;then
+		# Sed exit returned if no match (testing only)
+		#APP_EXEC sed\ -E\ -i\ \'/${2}.*/\{s//\#${2}/\;h\}\;\${x\;/./\{x\;q0\}\;x\;q1\}\' ${1}	 
+		APP_EXEC sed\ -E\ -i\ \'s/\#?${2}.*/${2}="${3}"/\'\ ${1} || error "Set conf failed:
 		FILE : ${1} 
 		VARS : ${2}
 		VALUE: ${3}
 	"
-	GET_CONF ${1} ${2} &>/dev/null || APP_EXEC "echo \"${2}=${3}\" >> ${1} "
+	else 
+		APP_EXEC "echo ${2}=\"${3}\" >> ${1}"
+	fi
 	sucess "Added ${2}=${3} from ${1}" | debug
 }
 
 function COMMENT_CONF(){
 	test $# -eq 2 || { error "Wrong usage of comment_conf";	return 1; };
-	APP_EXEC sed\ -E\ -i\ \'s/${2}.*/\#${2}/\'\ ${1} || error "comment conf failed:
+	#APP_EXEC sed\ -E\ -i\ \'s/${2}.*/\#${2}/\'\ ${1} 
+	APP_EXEC sed\ -E\ -i\ \'/${2}.*/\{s//\#${2}/\;h\}\;\${x\;/./\{x\;q0\}\;x\;q1\}\' ${1} || 	error "comment conf failed:
 		FILE : ${1} 
 		VARS : ${2}
 	"
@@ -387,9 +396,27 @@ function ADD_CONF(){
 
 }
 
+function CHECK_M_FILE(){
+	test "${M_TRIGG}" = "true" || return 1
+	test -r "${M_FILE}" || error "Can't read ${M_FILE} to get config"
+	local COUNT=0
+	declare -a M_CONF_SET
+	declare -a M_CONF_ADD
+	while read line;do
+		case "$(echo "${line}"|wc -w)" in
+			*) warn "Line ${COUNT} ignored: ${RED}${line}${YELLOW}";
+				COUNT=$((${COUNT} + 1));
+				continue;;
+			2) M_CONF_ADD+=( "${line}" );;
+			3) M_CONF_SET+=( "${line}" );;
+		esac
+		COUNT=$((${COUNT} + 1))
+	done<<<"$(cat ${M_FILE})"
+	return 0
+}
 
 function PHASE1(){
-	info "PHASE1 Starting"
+	info "${FUNCNAME[0]} Starting"
 	debug "Looking for old container"
 	local APP_NAME_TEST=$(lxc-ls ${APP_NAME})
 	if test ${UID} -eq 0 ;then 
@@ -432,8 +459,22 @@ function PHASE1(){
 	echo "lxc.mount.entry = $(realpath ${LOCAL_MOUNT_ENTRY}) ${APP_MOUNT_ENTRY} none bind,optional,create=dir 0 0" >> ${APP_CONFIG}
 	info "Starting container"
 	APP_START
-	sucess "PHASE1 Ended"
+	info "Doing an update"
+	for i in {1..10};do
+		silent GET_APP_IP 
+		if test $? -eq 0;then
+			break
+		else 
+			sleep 1
+		fi
+		test ${i} -eq 9 && error "Container don't have any IP address"
+	done
+	APP_EXEC "apk -q update"
+	info "Installing depandencies"
+	APP_EXEC  "apk add ${APP_DEPENDENCIES}"
 	DISPLAY_VARS
+	CHECK_M_FILE
+	sucess "${FUNCNAME[0]} Ended"
 }
 
 
@@ -479,22 +520,8 @@ CREATE TABLE users (
 
 }
 
-
 function PHASE2(){
-	info "PHASE2 Starting"
-	info "Doing an update"
-	for i in {1..10};do
-		GET_APP_IP 
-		if test $? -eq 0;then
-			break
-		else 
-			sleep 1
-		fi
-		test ${i} -eq 9 && error "Container don't have any IP address"
-	done
-	APP_EXEC "apk -q update"
-	info "Installing depandencies"
-	APP_EXEC  "apk add dovecot dovecot-sqlite postfix sqlite"
+	info "${FUNCNAME[0]} Starting"
 	DATABASE_CREATION
 	DOVE_PATH="/etc/dovecot"
 	DOVE_PATH_CONF="${DOVE_PATH}/conf.d"
@@ -506,6 +533,7 @@ function PHASE2(){
 	SET_CONF ${DOVE_MAIN_CONF} listen "127.0.0.1"
 	ADD_CONF ${DOVE_AUTH_CONF} "!include auth-sql.conf.ext"
 	DEL_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
+	APP_EXEC "service dovecot start &"
 }
 
 function MAIN(){
@@ -513,19 +541,20 @@ function MAIN(){
 	DO_VARS_SETTINGS
 	PHASE1
 	PHASE2
-	
 }
 
 #===============================================================================
 #   ARGUMENT PARSING
 #===============================================================================
 
-while getopts "hfdq" COMMANDES;do
+while getopts "hfdqm:" COMMANDES;do
 	case "${COMMANDES}" in
 		f) F_TRIGG=true;;
 		h) info "${HELP}";exit 0;;
 		d) D_TRIGG=true;HIDE="";;
 		q) Q_TRIGG=true;;
+		m) M_TRIGG=true;M_FILE=${OPTARG};;
+
 		*) error "Can't procceed this argument";;
 	esac
 done
