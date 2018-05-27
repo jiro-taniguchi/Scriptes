@@ -213,6 +213,7 @@ function APP_CREATE(){
 		warn "Near to hit the no more space avaible (>95%)"
 	fi
 	info "Creation du container"
+	test $(APP_STATE) -eq 0 && APP_CLOSE
 	lxc-create -n ${APP_NAME} -t download -- -d ${APP_DISTRIB_ID} -r ${APP_DISTRIB_VERS} -a ${APP_DISTRIB_ARCH} >/dev/null 2>&1 | debug
 	return $?	
 }
@@ -418,6 +419,10 @@ function CHECK_M_FILE(){
 	return 0
 }
 
+function APP_REBOOT(){
+	APP_CLOSE
+	APP_START
+}
 function PHASE1(){
 	info "${FUNCNAME[0]} Starting"
 	debug "Looking for old container"
@@ -523,20 +528,87 @@ CREATE TABLE users (
 
 }
 
+function 10_MASTER(){
+	data="""
+	service imap-login {
+  inet_listener imap {
+	port = 143
+  }
+  inet_listener imaps {
+
+  }
+}
+service pop3-login {
+  inet_listener pop3 {
+  }
+  inet_listener pop3s {
+  }
+}
+service lmtp {
+  unix_listener lmtp {
+	mode = 0666
+  }
+}
+service imap {
+
+}
+service pop3 {
+}
+
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0666
+  }
+  unix_listener auth-userdb {
+    mode = 0666
+    user = vmail
+    group = vmail
+  }
+
+}
+service auth-worker {
+}
+service dict {
+  unix_listener dict {
+  }
+}
+	"""
+	return 0
+}
+function REWRITE_FILE(){
+	test ${#} -eq 2 || error "Rewrite need two argument"
+	eval ${1} || error "Rewrite failed to find function ${1}"
+	APP_EXEC "echo \"${data}\" > ${2}"
+	return 0
+}
+
 function PHASE2(){
 	info "${FUNCNAME[0]} Starting"
 	DATABASE_CREATION
+	MAILBOX_PATH="/var/mail"
+	mkdir -p ${MAILBOX_PATH}
+	APP_EXEC "addgroup vmail"
+	APP_EXEC "adduser vmail" true
 	DOVE_PATH="/etc/dovecot"
 	DOVE_PATH_CONF="${DOVE_PATH}/conf.d"
 	DOVE_MAIN_CONF="${DOVE_PATH}/dovecot.conf"
 	DOVE_AUTH_CONF="${DOVE_PATH_CONF}/10-auth.conf"
 	DOVE_MAIL_CONF="${DOVE_PATH_CONF}/10-mail.conf"
+	DOVE_SQL_CONF="${DOVE_PATH}/dovecot-sql.conf.ext"
+	SET_CONF ${DOVE_PATH_CONF}/10-ssl.conf ssl no
 	SET_CONF ${DOVE_MAIN_CONF} login_greeting "Welcome to kinkazma"
 	SET_CONF ${DOVE_MAIN_CONF} protocols "imap lmtp"
-	SET_CONF ${DOVE_MAIN_CONF} listen "127.0.0.1"
+	SET_CONF ${DOVE_MAIN_CONF} listen "0.0.0.0, ::"
 	ADD_CONF ${DOVE_AUTH_CONF} "!include auth-sql.conf.ext"
 	COMMENT_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
-	APP_EXEC "service dovecot start &"
+	SET_CONF ${DOVE_SQL_CONF} driver "sqlite"
+	ADD_CONF ${DOVE_SQL_CONF} "connect = ${SQL_DB_FILE}"
+	ADD_CONF ${DOVE_SQL_CONF} "password_query = SELECT username, domain, password  FROM users WHERE username = '%n' AND domain = '%d'" 
+	ADD_CONF ${DOVE_SQL_CONF} "user_query = SELECT home, uid, gid  FROM users WHERE username = '%n' AND domain = '%d'"
+	ADD_CONF ${DOVE_MAIL_CONF} "mail_location = mbox:~/mail:INBOX=${MAILBOX_PATH}/%u"
+	REWRITE_FILE 10_MASTER ${DOVE_PATH_CONF}/10-master.conf
+
+	APP_EXEC "rc-update add dovecot default"
 }
 
 function MAIN(){
@@ -544,6 +616,7 @@ function MAIN(){
 	DO_VARS_SETTINGS
 	PHASE1
 	PHASE2
+	APP_REBOOT
 }
 
 #===============================================================================
