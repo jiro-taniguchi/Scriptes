@@ -63,13 +63,13 @@ RE_NUMERIC='^[0-9]+$'
 
 ## DEFAULT VALUES 
 PS3="Your choice:"
-APP_NAME="APP_SMTP"
+APP_NAME="APP_"
 HIDE=' >/dev/null 2>&1'
 ## LXC VARS
 #LXC_IP=192.168.113.58/24
 LXC_IP=""
 LXC_NET=""
-APP_DEPENDENCIES="dovecot dovecot-sqlite postfix sqlite"
+APP_DEPENDENCIES="vim "
 
 ## SOME VARS
 HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de container applicatifs
@@ -79,12 +79,14 @@ HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de 
 	-d	-	Debug mode.
 	-q	-	Quiet mode. (Assume -f)
 	-m	-	Config file for setconf and addconf (not mandatory if phases have been setted)
+	-s	-	Data file for PHASE2
 
 	Created by Kinkazma - www.kinkazma.ml
 """
 F_TRIGG=false
 D_TRIGG=false
 Q_TRIGG=false
+S_TRIGG=false
 function error(){
 	echo -en "${RED}[ERR] $1${NC}\n"
 	if test $# -eq 1;then
@@ -249,7 +251,7 @@ function APP_CLEAN(){
 	local CREATE_END_TRIGG=false
 	if test $(APP_STATE) -eq 0;then 
 		APP_CLOSE
-	elif test $(APP_STATE) -eq 1;then
+	elif test "$(APP_STATE)" -eq 1;then
 		info "${APP_NAME} is not running, cleaning..."
 	else
 		for i in $(seq 1 10);do
@@ -265,7 +267,12 @@ function APP_CLEAN(){
 		done
 		if test ${CREATE_END_TRIGG} = "false";then
 			LXC_CREATE_PID=$(ps -aux|grep lxc-create |grep -v grep | awk '{print $2}')
-			! test -z ${LXC_CREATE_PID} && rm -rf ${APP_PATH} || error "Aborting ! Can't clean old files"
+			if ! test -z ${LXC_CREATE_PID};then
+				kill -9 ${LXC_CREATE_PID}
+				rm -rf ${APP_PATH} 
+			else
+				error "Aborting ! Can't clean old files"
+			fi
 		fi
 	fi
 	declare -a PIPECODE
@@ -423,6 +430,17 @@ function APP_REBOOT(){
 	APP_CLOSE
 	APP_START
 }
+function REWRITE_FILE(){
+	test ${#} -eq 2 || error "Rewrite need two argument"
+	eval ${1} || error "Rewrite failed to find function ${1}"
+	APP_EXEC "echo \"${data}\" > ${2}"
+	return 0
+}
+function FUNC_EXIST(){
+	declare -f -F ${1:=PHASE2} > /dev/null
+	echo "$?"
+	return $?
+}
 function PHASE1(){
 	info "${FUNCNAME[0]} Starting"
 	debug "Looking for old container"
@@ -490,132 +508,11 @@ function PHASE1(){
 #  END OF TEMPLATE
 ####----------------------------------------
 
-function DATABASE_CREATION(){
-
-	SQL_DB_PATH="/srv/db"
-	SQL_DB_NAME="mailuser.db"
-	SQL_DB_FILE="${SQL_DB_PATH}/${SQL_DB_NAME}"
-	SQL_CREATE_DATABASE="""
- CREATE TABLE expires (
-   username varchar(100) not null,
-   mailbox varchar(255) not null,
-   expire_stamp integer not null,
-   primary key (username, mailbox)
- );
-
- CREATE TABLE quota (
-   username varchar(100) not null,
-   bytes bigint not null default 0,
-   messages integer not null default 0,
-   primary key (username)
- );
-
-CREATE TABLE users (
-     username VARCHAR(128) NOT NULL,
-     domain VARCHAR(128) NOT NULL,
-     password VARCHAR(64) NOT NULL,
-     home VARCHAR(255) NOT NULL,
-     uid INTEGER NOT NULL,
-     gid INTEGER NOT NULL,
-     active CHAR(1) DEFAULT 'Y' NOT NULL
- );
-	"""
-	echo "${SQL_CREATE_DATABASE}" > ${LOCAL_MOUNT_ENTRY}/create.sql
-	info "Database creation"
-	APP_EXEC "mkdir -p ${SQL_DB_PATH}"
-	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${APP_MOUNT_ENTRY}/create.sql 2>/dev/null" true
-	info "Database created"
-
-}
-
-function 10_MASTER(){
-	data="""
-	service imap-login {
-  inet_listener imap {
-	port = 143
-  }
-  inet_listener imaps {
-
-  }
-}
-service pop3-login {
-  inet_listener pop3 {
-  }
-  inet_listener pop3s {
-  }
-}
-service lmtp {
-  unix_listener lmtp {
-	mode = 0666
-  }
-}
-service imap {
-
-}
-service pop3 {
-}
-
-service auth {
-  unix_listener /var/spool/postfix/private/auth {
-    mode = 0666
-  }
-  unix_listener auth-userdb {
-    mode = 0666
-    user = vmail
-    group = vmail
-  }
-
-}
-service auth-worker {
-}
-service dict {
-  unix_listener dict {
-  }
-}
-	"""
-	return 0
-}
-function REWRITE_FILE(){
-	test ${#} -eq 2 || error "Rewrite need two argument"
-	eval ${1} || error "Rewrite failed to find function ${1}"
-	APP_EXEC "echo \"${data}\" > ${2}"
-	return 0
-}
-
-function PHASE2(){
-	info "${FUNCNAME[0]} Starting"
-	DATABASE_CREATION
-	MAILBOX_PATH="/var/mail"
-	mkdir -p ${MAILBOX_PATH}
-	APP_EXEC "addgroup vmail"
-	APP_EXEC "adduser vmail" true
-	DOVE_PATH="/etc/dovecot"
-	DOVE_PATH_CONF="${DOVE_PATH}/conf.d"
-	DOVE_MAIN_CONF="${DOVE_PATH}/dovecot.conf"
-	DOVE_AUTH_CONF="${DOVE_PATH_CONF}/10-auth.conf"
-	DOVE_MAIL_CONF="${DOVE_PATH_CONF}/10-mail.conf"
-	DOVE_SQL_CONF="${DOVE_PATH}/dovecot-sql.conf.ext"
-	SET_CONF ${DOVE_PATH_CONF}/10-ssl.conf ssl no
-	SET_CONF ${DOVE_MAIN_CONF} login_greeting "Welcome to kinkazma"
-	SET_CONF ${DOVE_MAIN_CONF} protocols "imap lmtp"
-	SET_CONF ${DOVE_MAIN_CONF} listen "0.0.0.0, ::"
-	ADD_CONF ${DOVE_AUTH_CONF} "!include auth-sql.conf.ext"
-	COMMENT_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
-	SET_CONF ${DOVE_SQL_CONF} driver "sqlite"
-	ADD_CONF ${DOVE_SQL_CONF} "connect = ${SQL_DB_FILE}"
-	ADD_CONF ${DOVE_SQL_CONF} "password_query = SELECT username, domain, password  FROM users WHERE username = '%n' AND domain = '%d'" 
-	ADD_CONF ${DOVE_SQL_CONF} "user_query = SELECT home, uid, gid  FROM users WHERE username = '%n' AND domain = '%d'"
-	ADD_CONF ${DOVE_MAIL_CONF} "mail_location = mbox:~/mail:INBOX=${MAILBOX_PATH}/%u"
-	REWRITE_FILE 10_MASTER ${DOVE_PATH_CONF}/10-master.conf
-
-	APP_EXEC "rc-update add dovecot default"
-}
-
 function MAIN(){
 	GET_INFO
 	DO_VARS_SETTINGS
 	PHASE1
-	PHASE2
+	test ${S_TRIGG} = "true" && PHASE2
 	APP_REBOOT
 }
 
@@ -623,14 +520,14 @@ function MAIN(){
 #   ARGUMENT PARSING
 #===============================================================================
 
-while getopts "hfdqm:" COMMANDES;do
+while getopts "hfdqm:s:" COMMANDES;do
 	case "${COMMANDES}" in
 		f) F_TRIGG=true;;
 		h) info "${HELP}";exit 0;;
 		d) D_TRIGG=true;HIDE="";;
 		q) Q_TRIGG=true;;
 		m) M_TRIGG=true;M_FILE=${OPTARG};;
-
+		s) S_TRIGG=true;S_FILE=${OPTARG};;
 		*) error "Can't procceed this argument";;
 	esac
 done
@@ -642,6 +539,15 @@ fi
 
 if test ${Q_TRIGG} = true;then
 	quiet
+fi
+
+if test ${S_TRIGG} = "true";then
+	test -e ${S_FILE} || error "The file to source :${S_FILE} doesn't exist" 
+	test -r ${S_FILE} || error "The file to source :${S_FILE} is not readable"
+	grep -q 'PHASE2' ${S_FILE} || error "No phase2 found on your source file"
+	source ${S_FILE} -T || error "Error while sourcing ${S_FILE}" 
+	test "$(FUNC_EXIST PHASE2)" -eq 0 || error "No function PHASE2 found exiting"
+	test "${APP_NAME}" = "APP_" && APP_NAME="APP_NULL"
 fi
 
 #===============================================================================
