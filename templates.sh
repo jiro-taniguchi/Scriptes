@@ -444,7 +444,7 @@ function FUNC_EXIST(){
 function PHASE1(){
 	info "${FUNCNAME[0]} Starting"
 	debug "Looking for old container"
-	local APP_NAME_TEST=$(lxc-ls ${APP_NAME})
+	local APP_NAME_TEST=$(lxc-ls ${APP_NAME}| grep -E "^${APP_NAME}$")
 	if test ${UID} -eq 0 ;then 
 		LXC_PATH=$(grep -vE '^#' /etc/lxc/lxc.conf | grep lxc.lxcpath | cut -d"=" -f 2)
 		if test -z ${LXC_PATH};then
@@ -547,9 +547,9 @@ if test ${S_TRIGG} = "true";then
 	grep -q 'PHASE2' ${S_FILE} || error "No phase2 found on your source file"
 	source ${S_FILE} -T || error "Error while sourcing ${S_FILE}" 
 	test "$(FUNC_EXIST PHASE2)" -eq 0 || error "No function PHASE2 found exiting"
-	test "${APP_NAME}" = "APP_" && APP_NAME="APP_NULL"
 fi
 
+test "${APP_NAME}" = "APP_" && APP_NAME="APP_NULL"
 #===============================================================================
 #   MAIN LAUNCH
 #===============================================================================
