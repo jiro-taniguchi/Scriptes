@@ -444,7 +444,7 @@ function FUNC_EXIST(){
 function PHASE1(){
 	info "${FUNCNAME[0]} Starting"
 	debug "Looking for old container"
-	local APP_NAME_TEST=$(lxc-ls ${APP_NAME}| grep -E "^${APP_NAME}$")
+	local APP_NAME_TEST=$(lxc-ls ${APP_NAME}| grep -o "${APP_NAME}")
 	if test ${UID} -eq 0 ;then 
 		LXC_PATH=$(grep -vE '^#' /etc/lxc/lxc.conf | grep lxc.lxcpath | cut -d"=" -f 2)
 		if test -z ${LXC_PATH};then
