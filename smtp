@@ -21,6 +21,8 @@
 
 APP_DEPENDENCIES=${APP_DEPENDENCIES}"dovecot dovecot-sqlite postfix sqlite"
 APP_NAME=${APP_NAME}"SMTP"
+DOMAIN="kinkazma.me"
+
 
 function DATABASE_CREATION(){
 
@@ -56,8 +58,41 @@ CREATE TABLE users (
 	info "Database creation"
 	APP_EXEC "mkdir -p ${SQL_DB_PATH}"
 	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${APP_MOUNT_ENTRY}/create.sql 2>/dev/null" true
+	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
+query = SELECT domain FROM domain WHERE domain='%s' AND backupmx = '0' AND active = '1'
+	\" > /etc/postfix/sqlite-virtual-mailbox-domains.cf"
+	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
+query = SELECT goto FROM alias WHERE address='%s' AND active = '1'
+	\" > /etc/postfix/sqlite-virtual-alias-maps.cf"
+	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
+query = SELECT maildir FROM mailbox WHERE username='%s' AND active = '1'
+	\" > /etc/postfix/sqlite-virtual-mailbox-maps.cf"
+	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
+query = SELECT username FROM mailbox WHERE username='%s' AND active = 1
+	\" > /etc/postfix/sqlite-sender-login-maps.cf"
 	info "Database created"
 
+}
+
+function 10_MAIL(){
+	data="""
+mail_location = maildir:/var/mail/vhosts/%d/%n/mail
+maildir_stat_dirs=yes
+
+namespace inbox {
+    inbox = yes
+}
+
+mail_uid = 5000
+mail_gid = 5000
+
+first_valid_uid = 5000
+last_valid_uid = 5000
+
+mail_privileged_group = vmail
+
+	"""
+	return 0
 }
 
 function 10_MASTER(){
@@ -77,8 +112,10 @@ service pop3-login {
   }
 }
 service lmtp {
-  unix_listener lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
 	mode = 0666
+	 user = postfix
+   group = postfix
   }
 }
 service imap {
@@ -90,15 +127,20 @@ service pop3 {
 service auth {
   unix_listener /var/spool/postfix/private/auth {
     mode = 0666
+		user = postfix
+    group = postfix
   }
   unix_listener auth-userdb {
     mode = 0666
     user = vmail
     group = vmail
   }
+  user = dovecot
 
 }
 service auth-worker {
+  user = vmail
+
 }
 service dict {
   unix_listener dict {
@@ -112,16 +154,18 @@ service dict {
 function PHASE2(){
 	info "${FUNCNAME[0]} Starting"
 	DATABASE_CREATION
-	MAILBOX_PATH="/var/mail"
-	mkdir -p ${MAILBOX_PATH}
-	APP_EXEC "addgroup vmail"
-	APP_EXEC "adduser vmail" true
+	MAILBOX_PATH="/var/mail/vhosts/"
+	APP_EXEC "mkdir -p ${MAILBOX_PATH}/${DOMAIN}"
+	APP_EXEC "addgroup vmail -g 5000"
+	APP_EXEC "adduser vmail -u 5000" true
+	APP_EXEC "chown -R vmail:vmail ${MAILBOX_PATH}"
 	DOVE_PATH="/etc/dovecot"
 	DOVE_PATH_CONF="${DOVE_PATH}/conf.d"
 	DOVE_MAIN_CONF="${DOVE_PATH}/dovecot.conf"
 	DOVE_AUTH_CONF="${DOVE_PATH_CONF}/10-auth.conf"
 	DOVE_MAIL_CONF="${DOVE_PATH_CONF}/10-mail.conf"
 	DOVE_SQL_CONF="${DOVE_PATH}/dovecot-sql.conf.ext"
+	SMTP_MAIN_CF="/etc/postfix/main.cf"
 	SET_CONF ${DOVE_PATH_CONF}/10-ssl.conf ssl no
 	SET_CONF ${DOVE_MAIN_CONF} login_greeting "Welcome to kinkazma"
 	SET_CONF ${DOVE_MAIN_CONF} protocols "imap lmtp"
@@ -129,13 +173,53 @@ function PHASE2(){
 	ADD_CONF ${DOVE_AUTH_CONF} "!include auth-sql.conf.ext"
 	COMMENT_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
 	SET_CONF ${DOVE_SQL_CONF} driver "sqlite"
+	SET_CONF ${DOVE_SQL_CONF} "default_pass_scheme" "MD5-CRYPT"
 	ADD_CONF ${DOVE_SQL_CONF} "connect = ${SQL_DB_FILE}"
 	ADD_CONF ${DOVE_SQL_CONF} "password_query = SELECT username, domain, password  FROM users WHERE username = '%n' AND domain = '%d'" 
 	ADD_CONF ${DOVE_SQL_CONF} "user_query = SELECT home, uid, gid  FROM users WHERE username = '%n' AND domain = '%d'"
-	ADD_CONF ${DOVE_MAIL_CONF} "mail_location = mbox:~/mail:INBOX=${MAILBOX_PATH}/%u"
+	ADD_CONF ${DOVE_MAIL_CONF} "mail_location = mbox:~/mail:INBOX=${MAILBOX_PATH}/%d/%u"
 	REWRITE_FILE 10_MASTER ${DOVE_PATH_CONF}/10-master.conf
-
+	REWRITE_FILE 10_MAIL ${DOVE_PATH_CONF}/10-mail.conf
+	APP_EXEC "chown -R vmail:dovecot /etc/dovecot/"
+	APP_EXEC "chmod -R o-rwx /etc/dovecot"
 	APP_EXEC "rc-update add dovecot default"
+	SET_CONF ${SMTP_MAIN_CF} "mydomain" "${DOMAIN}"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sasl_auth_enable" "yes"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sasl_type" "dovecot"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sasl_path" "private/auth"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sasl_security_options" "noanonymous"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sasl_local_domain" "\$mydomain"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sasl_authenticated_header" "yes"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sasl_auth_clients" "yes"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_uid_maps" "static:5000"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_gid_maps" "static:5000"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_minimum_uid"  "5000"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_base" "/var/mail"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_domains" "sqlite:\/etc\/postfix\/sqlite-virtual-mailbox-domains.cf"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_maps" "sqlite:\/etc\/postfix\/sqlite-virtual-mailbox-maps.cf"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_alias_maps" "sqlite:\/etc\/postfix\/sqlite-virtual-alias-maps.cf"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sender_login_maps" "sqlite:\/etc\/postfix\/sqlite-sender-login-maps.cf"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_transport" "lmtp:unix:private\/dovecot-lmtp"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_banner"         " ESMTP $DOMAIN (Debian\/GNU)"
+	SET_CONF ${SMTP_MAIN_CF} "biff"                 " no"
+	SET_CONF ${SMTP_MAIN_CF} "append_dot_mydomain"  " no"
+	SET_CONF ${SMTP_MAIN_CF} "readme_directory"     " no"
+	SET_CONF ${SMTP_MAIN_CF} "delay_warning_time"   " 4h"
+	SET_CONF ${SMTP_MAIN_CF} "mailbox_command"      " procmail -a \"\$EXTENSION\""
+	SET_CONF ${SMTP_MAIN_CF} "recipient_delimiter"  " +"
+	SET_CONF ${SMTP_MAIN_CF} "disable_vrfy_command" " yes"
+	SET_CONF ${SMTP_MAIN_CF} "message_size_limit"   " 502400000"
+	SET_CONF ${SMTP_MAIN_CF} "mailbox_size_limit"   " 1024000000"
+	SET_CONF ${SMTP_MAIN_CF} "inet_interfaces" " all"
+	SET_CONF ${SMTP_MAIN_CF} "inet_protocols" " ipv4"
+	SET_CONF ${SMTP_MAIN_CF} "myhostname"    "hostname.${DOMAIN}"
+	SET_CONF ${SMTP_MAIN_CF} "myorigin"      " hostname.${DOMAIN}"
+	SET_CONF ${SMTP_MAIN_CF} "mydestination" " localhost localhost.\$mydomain"
+	SET_CONF ${SMTP_MAIN_CF} "mynetworks"    " 127.0.0.0\/8 \[::ffff:127.0.0.0\]\/104 \[::1\]\/128"
+	SET_CONF ${SMTP_MAIN_CF} "relayhost"     ""
+	SET_CONF ${SMTP_MAIN_CF} "alias_maps"     " hash:\/etc\/aliases"
+	SET_CONF ${SMTP_MAIN_CF} "alias_database" " hash:\/etc\/aliases"
+	APP_EXEC "rc-update add postfix default"
 }
 
 

@@ -84,6 +84,7 @@ HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de 
 	Created by Kinkazma - www.kinkazma.ml
 """
 F_TRIGG=false
+N_TRIGG=false
 D_TRIGG=false
 Q_TRIGG=false
 S_TRIGG=false
@@ -114,11 +115,13 @@ function confirm(){
 	fi
 	SENTENCE=${1:="Are you sure about this ? "}
 	SENTENCE=${SENTENCE}" (yes/no)"
+	test ${2:-"false"} = "true" && local ADD_EXIT="exit" || local ADD_EXIT=""
 	echo -en "${BLUE}[?] ${SENTENCE}${NC}\n"
-	select answer in yes no;do
+	select answer in yes no ${ADD_EXIT};do
 		case ${answer} in
 			yes)  return 0;;
 			no) return 1;;
+			exit) exit 0;;
 			*) warn "Did not understant your choice !"
 		esac
 	done
@@ -463,7 +466,7 @@ function PHASE1(){
 	LOCAL_MOUNT_ENTRY="./share_${APP_NAME}"
 
 	if ! test -z ${APP_NAME_TEST};then
-		confirm "${APP_NAME} found, do you want to erase it ?" && APP_CLEAN 
+		confirm "${APP_NAME} found, do you want to erase it ?" true && APP_CLEAN 
 		if test ${?} -ne 0;then
 			APP_CURRENT=$(grep -oP '(?<=^ID=).*' ${APP_ROOTFS}/etc/os-release )
 			test "${APP_CURRENT}x" = "alpinex" && warn "We're using old APP_SMTP" ||	error "Can't go further, APP_SMTP is not alpine"
@@ -520,7 +523,7 @@ function MAIN(){
 #   ARGUMENT PARSING
 #===============================================================================
 
-while getopts "hfdqm:s:" COMMANDES;do
+while getopts "hfdqnm:s:" COMMANDES;do
 	case "${COMMANDES}" in
 		f) F_TRIGG=true;;
 		h) info "${HELP}";exit 0;;
@@ -528,6 +531,7 @@ while getopts "hfdqm:s:" COMMANDES;do
 		q) Q_TRIGG=true;;
 		m) M_TRIGG=true;M_FILE=${OPTARG};;
 		s) S_TRIGG=true;S_FILE=${OPTARG};;
+		n) N_TRIGG=true;;
 		*) error "Can't procceed this argument";;
 	esac
 done
@@ -548,8 +552,14 @@ if test ${S_TRIGG} = "true";then
 	source ${S_FILE} -T || error "Error while sourcing ${S_FILE}" 
 	test "$(FUNC_EXIST PHASE2)" -eq 0 || error "No function PHASE2 found exiting"
 fi
-
-test "${APP_NAME}" = "APP_" && APP_NAME="APP_NULL"
+if test ${N_TRIGG} = "true" && test ${S_TRIGG} = "false";then
+	test "${APP_NAME}" = "APP_" && APP_NAME="APP_NULL"
+	info "Null APP command"
+elif test ${N_TRIGG} = "false" && test ${S_TRIGG} = "false";then
+	error "Source APP is missing"
+elif test ${N_TRIGG} = "true" && test ${S_TRIGG} = "true";then
+	error "Can't put those argument together"
+fi
 #===============================================================================
 #   MAIN LAUNCH
 #===============================================================================
