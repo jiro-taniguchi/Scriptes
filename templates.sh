@@ -80,7 +80,7 @@ HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de 
 	-q	-	Quiet mode. (Assume -f)
 	-m	-	Config file for setconf and addconf (not mandatory if phases have been setted)
 	-s	-	Data file for PHASE2
-	-n 	- Null template 
+	-n 	-	Null template 
 	Created by Kinkazma - www.kinkazma.ml
 """
 F_TRIGG=false
