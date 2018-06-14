@@ -59,16 +59,16 @@ CREATE TABLE users (
 	APP_EXEC "mkdir -p ${SQL_DB_PATH}"
 	APP_EXEC "sqlite3 ${SQL_DB_FILE} < ${APP_MOUNT_ENTRY}/create.sql 2>/dev/null" true
 	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
-query = SELECT domain FROM domain WHERE domain='%s' AND backupmx = '0' AND active = '1'
+query = SELECT domain FROM users WHERE domain='%s' AND active = '1'
 	\" > /etc/postfix/sqlite-virtual-mailbox-domains.cf"
 	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
-query = SELECT goto FROM alias WHERE address='%s' AND active = '1'
+query = SELECT goto FROM alias WHERE address='%s' AND active = 'Y'
 	\" > /etc/postfix/sqlite-virtual-alias-maps.cf"
 	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
-query = SELECT maildir FROM mailbox WHERE username='%s' AND active = '1'
+query = SELECT home FROM users WHERE username='%s' AND active = 'Y'
 	\" > /etc/postfix/sqlite-virtual-mailbox-maps.cf"
 	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
-query = SELECT username FROM mailbox WHERE username='%s' AND active = 1
+query = SELECT username FROM users WHERE username='%s' AND active = 'Y'
 	\" > /etc/postfix/sqlite-sender-login-maps.cf"
 	info "Database created"
 
@@ -222,4 +222,9 @@ function PHASE2(){
 	APP_EXEC "rc-update add postfix default"
 }
 
+function STANDALONE(){
+	
+}
+
+test "${1}x" = "x" ||  eval ${1}
 
