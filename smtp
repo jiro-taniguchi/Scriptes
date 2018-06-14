@@ -222,9 +222,6 @@ function PHASE2(){
 	APP_EXEC "rc-update add postfix default"
 }
 
-function STANDALONE(){
-	
-}
 
-test "${1}x" = "x" ||  eval ${1}
+
 
