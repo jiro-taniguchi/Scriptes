@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="MailGarbage">
+    <meta name="author" content="Kinkazma">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+    {% if title %}
+    <title>MailGarbage - {{ title }}</title>
+    {% else %}
+    <title>MailGarbage</title>
+    {% endif %}
+
+
+    <!-- Bootstrap core CSS -->
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+
+    <!-- Custom styles for this template -->
+    <link href="{{ url_for('static', filename='css/main.css') }}" rel="stylesheet">
+</head>
+
+<body class="text-center">
+
+
+<div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category,message in messages %}
+    <div class="fixed-alert alert alert-{{ category }} ">
+        {{ message }}
+    </div>
+
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock content %}
+</div>
+</body>
+
+
+</html>

@@ -1,0 +1,59 @@
+{% extends "layout.html" %}
+{% block content %}
+
+
+<form method="POST" class="form-signin" action="">
+    {{ form.hidden_tag() }}
+    <div class="text-center mb-4">
+        <img class="mb-4" src="{{ url_for('static', filename='img/logo.png') }}" alt="" width="72" height="72">
+        <h1 class="h2 mb-2 font-weight-bold">Garbage MailBox</h1>
+    </div>
+    <fieldset class="form-group">
+        <h1 class="h3 mb-3 font-weight-normal">Administration</h1>
+    </fieldset>
+    <div class="form-group">
+        <p>Username</p>
+
+        {{ form.username.label(class="sr-only") }}
+        {% if form.username.errors %}
+        {{ form.username(class="form-control form-control-lg is-invalid") }}
+        <div class="invalid-feedback">
+            {% for error in form.username.errors %}
+            <span>{{ error }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        {{ form.username(class="form-control form-control-lg") }}
+        {% endif %}
+    </div>
+    <div class="form-group">
+        <p>Password</p>
+
+        {{ form.password.label(class="sr-only") }}
+        {% if form.password.errors %}
+        {{ form.password(class="form-control form-control-lg is-invalid") }}
+
+        <div class="invalid-feedback">
+            {% for error in form.password.errors %}
+            <span>{{ error }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        {{ form.password(class="form-control form-control-lg") }}
+        {% endif %}
+    </div>
+    <div class="form-group">
+
+        <p>Se souvenire de moi</p>
+        {{ form.remember(class="form-control") }}
+        {{ form.remember.label(class="sr-only ") }}
+
+
+    </div>
+    <div class="form-group">
+        {{ form.submit(class="btn btn-lg btn-primary btn-block") }}
+    </div>
+    <p class="mt-5 mb-3 text-muted">&copy; 2017-2018 Kinkazma</p>
+</form>
+
+{% endblock content %}
