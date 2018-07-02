@@ -1,0 +1,73 @@
+
+
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="content-section">
+    <div class="text-center mb-4">
+        <img class="mb-4" src="{{ url_for('static', filename='img/logo.png') }}" alt="" width="85" height="100">
+        <h1 class="h2 mb-2 font-weight-bold">Welcome {{ current_user.username }}</h1>
+      </div>
+    <form method="POST" action="" >
+        {{ form.hidden_tag() }}
+        <fieldset class="form-group">
+            <legend class="border-bottom mb-4">Administration</legend>
+
+            <div class="form-group">
+                {{ form.time_to_destroy.label(class="form-control-label") }}
+                {% if form.time_to_destroy.errors %}
+                {{ form.time_to_destroy(class="form-control form-control-lg is-invalid") }}
+                <div class="invalid-feedback">
+                    {% for error in form.time_to_destroy.errors %}
+                    <span>{{ error }}</span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                {{ form.time_to_destroy(class="form-control form-control-lg") }}
+                {% endif %}
+            </div>
+            <div class="form-group">
+                {{ form.max_number_mailbox.label(class="form-control-label") }}
+                {% if form.max_number_mailbox.errors %}
+                {{ form.max_number_mailbox(class="form-control form-control-lg is-invalid") }}
+                <div class="invalid-feedback">
+                    {% for error in form.max_number_mailbox.errors %}
+                    <span>{{ error }}</span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                {{ form.max_number_mailbox(class="form-control form-control-lg") }}
+                {% endif %}
+            </div>
+                  <div class="form-group">
+                {{ form.password.label(class="form-control-label") }}
+                {% if form.password.errors %}
+                {{ form.password(class="form-control form-control-lg is-invalid") }}
+                <div class="invalid-feedback">
+                    {% for error in form.password.errors %}
+                    <span>{{ error }}</span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                {{ form.password(class="form-control form-control-lg") }}
+                {% endif %}
+            </div>
+            <div class="form-check">
+                {{ form.will_backup(class="form-check-input") }}
+                {{ form.will_backup.label(class="form-check-label") }}
+            </div>
+        </fieldset>
+        <div class="form-group">
+            {{ form.submit(class="btn btn-outline-info") }}
+        </div>
+        <small class="text-muted ml-2">
+            <a href="{{ url_for('static', filename='./mg_config.txt') }}">Download config</a>
+        </small>
+    </form>
+</div>
+<div class="border-top pt-3">
+    <small class="text-muted">
+        <p class="mt-5 mb-3 text-muted">&copy; 2017-2018 Kinkazma</p>
+    </small>
+</div>
+{% endblock content %}
