@@ -81,12 +81,15 @@ HELP="""$(basename ${0}) - Templates.sh : Scriptes de base pour la création de 
 	-m	-	Config file for setconf and addconf (not mandatory if phases have been setted)
 	-s	-	Data file for PHASE2
 	-n 	-	Null template 
-	Created by Kinkazma - www.kinkazma.ml
+
+	Try ${0} -- -h  to get templates options
+	[*] Created by Kinkazma - www.kinkazma.ml [*]
 """
 F_TRIGG=false
 N_TRIGG=false
 D_TRIGG=false
 Q_TRIGG=false
+H_TRIGG=false
 S_TRIGG=false
 function error(){
 	echo -en "${RED}[ERR] $1${NC}\n"
@@ -374,11 +377,11 @@ function DEL_CONF(){
 
 function SET_CONF(){
 	test $# -eq 3 || { error "Wrong usage of set_conf";	return 1; };
-  APP_EXEC " grep -iq \"${2}\" ${1} 2>&1" true
+  APP_EXEC " egrep -iq \"^${2}\" ${1} 2>&1" true
 	if test ${?} -eq 0;then
 		# Sed exit returned if no match (testing only)
 		#APP_EXEC sed\ -E\ -i\ \'/${2}.*/\{s//\#${2}/\;h\}\;\${x\;/./\{x\;q0\}\;x\;q1\}\' ${1}	 
-		APP_EXEC sed\ -E\ -i\ \'s/\#?${2}.*/${2}="${3}"/\'\ ${1} || error "Set conf failed:
+		APP_EXEC sed\ -E\ -i\ \'s%\#?${2}=.*%${2}="${3}"%\'\ ${1} || error "Set conf failed:
 		FILE : ${1} 
 		VARS : ${2}
 		VALUE: ${3}
@@ -525,13 +528,13 @@ function MAIN(){
 
 while getopts "hfdqnm:s:" COMMANDES;do
 	case "${COMMANDES}" in
-		f) F_TRIGG=true;;
-		h) info "${HELP}";exit 0;;
-		d) D_TRIGG=true;HIDE="";;
-		q) Q_TRIGG=true;;
-		m) M_TRIGG=true;M_FILE=${OPTARG};;
-		s) S_TRIGG=true;S_FILE=${OPTARG};;
-		n) N_TRIGG=true;;
+		'f') F_TRIGG=true;;
+		'h') info "${HELP}";exit 0;;
+		'd') D_TRIGG=true;HIDE="";;
+		'q') Q_TRIGG=true;;
+		'm') M_TRIGG=true;M_FILE=${OPTARG};;
+		's') S_TRIGG=true;S_FILE=${OPTARG};;
+		'n') N_TRIGG=true;;
 		*) error "Can't procceed this argument";;
 	esac
 done
@@ -552,6 +555,13 @@ if test ${S_TRIGG} = "true";then
 	source ${S_FILE} -T || error "Error while sourcing ${S_FILE}" 
 	test "$(FUNC_EXIST PHASE2)" -eq 0 || error "No function PHASE2 found exiting"
 fi
+if test $(eval "echo \$$((${OPTIND}-1))") = "--";then
+	H_TRIGG=true
+fi
+if test ${H_TRIGG} = true;then
+	ARGS=$(echo ${@} |grep -o '.--.*')
+	test $(FUNC_EXIST HELPER) -eq 0 && HELPER ${ARGS} || error "No helper found."
+fi
 if test ${N_TRIGG} = "true" && test ${S_TRIGG} = "false";then
 	test "${APP_NAME}" = "APP_" && APP_NAME="APP_NULL"
 	info "Null APP command"
@@ -563,7 +573,7 @@ fi
 #===============================================================================
 #   MAIN LAUNCH
 #===============================================================================
-
+exit 0
 MAIN
 
 #===============================================================================

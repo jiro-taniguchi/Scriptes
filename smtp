@@ -62,7 +62,7 @@ CREATE TABLE users (
 query = SELECT domain FROM users WHERE domain='%s' AND active = '1'
 	\" > /etc/postfix/sqlite-virtual-mailbox-domains.cf"
 	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
-query = SELECT goto FROM alias WHERE address='%s' AND active = 'Y'
+query = SELECT goto FROM users WHERE address='%s' AND active = 'Y'
 	\" > /etc/postfix/sqlite-virtual-alias-maps.cf"
 	APP_EXEC "echo \"dbpath = ${SQL_DB_FILE}
 query = SELECT home FROM users WHERE username='%s' AND active = 'Y'
@@ -165,6 +165,7 @@ function PHASE2(){
 	DOVE_AUTH_CONF="${DOVE_PATH_CONF}/10-auth.conf"
 	DOVE_MAIL_CONF="${DOVE_PATH_CONF}/10-mail.conf"
 	DOVE_SQL_CONF="${DOVE_PATH}/dovecot-sql.conf.ext"
+	DOVE_LOGGING_CONF="${DOVE_PATH_CONF}/10-logging.conf"
 	SMTP_MAIN_CF="/etc/postfix/main.cf"
 	SET_CONF ${DOVE_PATH_CONF}/10-ssl.conf ssl no
 	SET_CONF ${DOVE_MAIN_CONF} login_greeting "Welcome to kinkazma"
@@ -173,7 +174,7 @@ function PHASE2(){
 	ADD_CONF ${DOVE_AUTH_CONF} "!include auth-sql.conf.ext"
 	COMMENT_CONF ${DOVE_AUTH_CONF} "!include auth-passwdfile.conf.ext"
 	SET_CONF ${DOVE_SQL_CONF} driver "sqlite"
-	SET_CONF ${DOVE_SQL_CONF} "default_pass_scheme" "MD5-CRYPT"
+	SET_CONF ${DOVE_SQL_CONF} "default_pass_scheme" "plain"
 	ADD_CONF ${DOVE_SQL_CONF} "connect = ${SQL_DB_FILE}"
 	ADD_CONF ${DOVE_SQL_CONF} "password_query = SELECT username, domain, password  FROM users WHERE username = '%n' AND domain = '%d'" 
 	ADD_CONF ${DOVE_SQL_CONF} "user_query = SELECT home, uid, gid  FROM users WHERE username = '%n' AND domain = '%d'"
@@ -195,12 +196,12 @@ function PHASE2(){
 	SET_CONF ${SMTP_MAIN_CF} "virtual_gid_maps" "static:5000"
 	SET_CONF ${SMTP_MAIN_CF} "virtual_minimum_uid"  "5000"
 	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_base" "/var/mail"
-	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_domains" "sqlite:\/etc\/postfix\/sqlite-virtual-mailbox-domains.cf"
-	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_maps" "sqlite:\/etc\/postfix\/sqlite-virtual-mailbox-maps.cf"
-	SET_CONF ${SMTP_MAIN_CF} "virtual_alias_maps" "sqlite:\/etc\/postfix\/sqlite-virtual-alias-maps.cf"
-	SET_CONF ${SMTP_MAIN_CF} "smtpd_sender_login_maps" "sqlite:\/etc\/postfix\/sqlite-sender-login-maps.cf"
-	SET_CONF ${SMTP_MAIN_CF} "virtual_transport" "lmtp:unix:private\/dovecot-lmtp"
-	SET_CONF ${SMTP_MAIN_CF} "smtpd_banner"         " ESMTP $DOMAIN (Debian\/GNU)"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_domains" "sqlite:/etc/postfix/sqlite-virtual-mailbox-domains.cf"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_mailbox_maps" "sqlite:/etc/postfix/sqlite-virtual-mailbox-maps.cf"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_alias_maps" "sqlite:/etc/postfix/sqlite-virtual-alias-maps.cf"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_sender_login_maps" "sqlite:/etc/postfix/sqlite-sender-login-maps.cf"
+	SET_CONF ${SMTP_MAIN_CF} "virtual_transport" "lmtp:unix:private/dovecot-lmtp"
+	SET_CONF ${SMTP_MAIN_CF} "smtpd_banner"         " ESMTP $DOMAIN (Debian/GNU)"
 	SET_CONF ${SMTP_MAIN_CF} "biff"                 " no"
 	SET_CONF ${SMTP_MAIN_CF} "append_dot_mydomain"  " no"
 	SET_CONF ${SMTP_MAIN_CF} "readme_directory"     " no"
@@ -215,16 +216,49 @@ function PHASE2(){
 	SET_CONF ${SMTP_MAIN_CF} "myhostname"    "hostname.${DOMAIN}"
 	SET_CONF ${SMTP_MAIN_CF} "myorigin"      " hostname.${DOMAIN}"
 	SET_CONF ${SMTP_MAIN_CF} "mydestination" " localhost localhost.\$mydomain"
-	SET_CONF ${SMTP_MAIN_CF} "mynetworks"    " 127.0.0.0\/8 \[::ffff:127.0.0.0\]\/104 \[::1\]\/128"
+	SET_CONF ${SMTP_MAIN_CF} "mynetworks"    " 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128"
 	SET_CONF ${SMTP_MAIN_CF} "relayhost"     ""
-	SET_CONF ${SMTP_MAIN_CF} "alias_maps"     " hash:\/etc\/aliases"
-	SET_CONF ${SMTP_MAIN_CF} "alias_database" " hash:\/etc\/aliases"
+	SET_CONF ${SMTP_MAIN_CF} "alias_maps"     " hash:/etc/aliases"
+	SET_CONF ${SMTP_MAIN_CF} "alias_database" " hash:/etc/aliases"
+	SET_CONF ${DOVE_LOGGING_CONF} "auth_verbose" "yes"
+	SET_CONF ${DOVE_LOGGING_CONF} "auth_verbose_passwords" "yes"
+	SET_CONF ${DOVE_LOGGING_CONF} "auth_debug" "yes"
+	SET_CONF ${DOVE_LOGGING_CONF} "auth_debug_passwords" "yes"
+	SET_CONF ${DOVE_LOGGING_CONF} "mail_debug" "yes"
+	SET_CONF ${DOVE_LOGGING_CONF} "verbose_ssl" "yes"
+	SET_CONF ${DOVE_AUTH_CONF} "auth_mechanisms" "plain"
 	APP_EXEC "rc-update add postfix default"
 }
 
-function STANDALONE(){
 	
+
+function HELPER(){
+	local OPTIND
+	local OPTARG
+	shift
+
+
+	HELP="""${HELP}
+	------- SMTP Options -------
+	-d	- Domain to use (default : kinkazma.me)
+	-h	- Show this help
+	"""
+	while getopts 'hd:' OPTIONS;do
+		case "${OPTIONS}" in
+			h) echo "${HELP}"; exit 0
+				;;
+			d) DOMAIN=${OPTARG}
+				;;
+			*) echo "Did not understand"; exit 0
+				;;
+		esac
+	done
 }
 
-test "${1}x" = "x" ||  eval ${1}
+
+if test ${0} = ${BASH_SOURCE};then
+	echo "Must be run from template."
+	exit 0
+fi
+
 
