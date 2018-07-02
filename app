@@ -49,6 +49,11 @@ function HELPER(){
 				;;
 		esac
 	done
+	if test $((${OPTIND} -1)) -eq 0;then
+		echo "${HELP}"
+		exit 0
+	fi
+
 }
 
 if test ${0} = ${BASH_SOURCE};then
