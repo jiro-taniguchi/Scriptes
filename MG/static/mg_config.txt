@@ -1,6 +1,5 @@
 [main]
-will_backup = True
-max_number_mailbox = 78
+will_backup = False
+max_number_mailbox = 100
 time_to_destroy = 15
-password = Qwerty!!
 

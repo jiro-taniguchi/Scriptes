@@ -1,0 +1,277 @@
+#!/bin/bash
+#===============================================================================
+#
+#          FILE:  web.sh
+# 
+#         USAGE:  ./web.sh 
+# 
+#   DESCRIPTION:  
+# 
+#       OPTIONS:  ---
+#  REQUIREMENTS:  ---
+#          BUGS:  ---
+#         NOTES:  ---
+#        AUTHOR:  Kazuma Yoshiyuki (), mohamed.ladghem@kinkazma.ga
+#       COMPANY:  KINKAZMA.GA
+#       VERSION:  1.0
+#       CREATED:  25/06/2018 20:51:03 CEST
+#      REVISION:  ---
+#===============================================================================
+
+NAME="WEB" # Your name of the app
+DEPENDENCIES="caddy" # Dependencies needed
+#APP_DEPENDENCIES=${APP_DEPENDENCIES}"${DEPENDENCIES}"
+APP_NAME=${APP_NAME}"${NAME}"  
+DOMAIN="hakase.lab"
+WEB_SRV="caddy"
+HOSTAME=${NAME}
+DO_SSL=false
+HOSTAME_TRIGG=false
+ROOT_FOLDER_TRIGG=false
+WEB_SRV_TRIGG=false
+TYPE_TRIGG=false
+CERT_TRIGG=false
+SELF_CERT_TRIGG=false
+KEY_TRIGG=false
+LOCAL_MOUNT_ENTRY="./share_${APP_NAME}"
+ROOT_FOLDER=${LOCAL_MOUNT_ENTRY}/www
+ALLOWED_TYPES=(git webdav php)
+SENTENCE=""
+CAPABILITIES=""
+PHP7_LIBS="php7-mcrypt php7-soap php7-openssl php7-gmp php7-pdo_odbc php7-json php7-dom php7-pdo php7-zip php7-mysqli php7-sqlite3 php7-apcu php7-pdo_pgsql php7-bcmath php7-gd php7-odbc php7-pdo_mysql php7-pdo_sqlite php7-gettext php7-xmlreader php7-xmlrpc php7-bz2 php7-iconv php7-pdo_dblib php7-curl php7-ctype"
+function CADDY_WEB_INIT_CONF(){
+	WEB_WEBDAV_CONF="""webdav / {
+    scope       ${ROOT_OF_APP}
+    modify      true       
+    block       dotfiles
+}
+	"""
+	WEB_AUTH_CONF="""basicauth / "${WEB_USER}" ${WEB_PASSWORD} """
+	WEB_SSL_CONF="""tls ${WEB_CERT_FILE} ${WEB_CERT_KEY}"""
+	WEB_SIMPLE_CONF="""*
+	gzip
+	log /var/log/${FQDN}.app-access.log
+    errors /var/log/${FQDN}.app-error.log 
+    root ${ROOT_OF_APP}
+	"""
+	WEB_PHP_CONF="""fastcgi / /run/php/php7.0-fpm.sock php {
+         ext .php
+         split .php
+         index index.php
+	"""
+
+
+}
+function NGINX_WEB_INIT_CONF(){
+	WEB_WEBDAV_CONF="""location / {
+                try_files \$uri \$uri/ /index.html;
+                client_body_temp_path   /temp;
+                dav_methods             PUT DELETE MKCOL COPY MOVE;
+                dav_ext_methods         PROPFIND OPTIONS;
+                create_full_put_path    on;
+                dav_access              user:rw group:rw all:rw;
+                autoindex               on;
+         }
+	"""
+	WEB_SSL_CONF="""listen 443 ssl http2; 
+        ssl_certificate /srv/security/cert.pem;
+        ssl_certificate_key /srv/security/key.pem; 
+        ssl_session_cache shared:le_nginx_SSL:1m;
+		ssl_session_timeout 1440m;
+		ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+		ssl_prefer_server_ciphers on;
+		ssl_ciphers "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA:ECDHE-ECDSA-DES-CBC3-SHA:ECDHE-RSA-DES-CBC3-SHA:EDH-RSA-DES-CBC3-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:DES-CBC3-SHA:!DSS";
+		ssl_dhparam /srv/security/dhparam.pem; 
+        if ($scheme != "https") {
+                return 301 https://\$host\$request_uri;
+        } 
+	"""
+	WEB_SIMPLE_CONF="""server_name ${FQDN};
+        root ${ROOT_OF_APP}; 
+        index index.php index.html index.htm;
+		access_log /var/log/nginx/${FQDN}.app-access.log;
+    	error_log  /var/log/nginx/${FQDN}.app-error.log error;
+    	charset utf-8;
+    	gzip on;
+		gzip_disable "msie6";
+    	location ~ /\.ht {
+        deny all;
+    }
+	"""
+	WEB_PHP_CONF="""location ~ \.php$ {
+        fastcgi_split_path_info ^(.+\.php)(/.+)\$;
+        fastcgi_pass unix:/run/php/php7.0-fpm.sock;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_intercept_errors on;
+        fastcgi_buffer_size 16k;
+        fastcgi_buffers 4 16k;
+    }
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+	"""
+	WEB_AUTH_CONF="""
+	auth_basic            "Restricted ${FQDN}";
+	auth_basic_user_file  ${AUTH_FILE};
+	"""
+	WEB_GIT_CONF="""location ~ /git(/.*) {
+		client_max_body_size			0;
+		fastcgi_param	SCRIPT_FILENAME		/usr/lib/git-core/git-http-backend;
+		include			fastcgi_params;
+		fastcgi_param	GIT_HTTP_EXPORT_ALL	"";
+		fastcgi_param	GIT_PROJECT_ROOT	/git;
+		fastcgi_param	PATH_INFO		$1;
+		fastcgi_param	REMOTE_USER		\$remote_user;
+		fastcgi_pass	unix:/var/run/fcgiwrap.socket;
+	}
+	"""
+
+	
+}
+
+function COMPUTE_VHOST(){
+	APPEND=""
+	for i in ${@};do 
+		APPEND="""${APPEND}
+		$(eval ${WEB_${i^^}_CONF})
+		"""
+	done
+
+	data="""${SENTENCE} {
+		${WEB_SIMPLE_CONF}
+		${APPEND}
+	}
+	"""
+	return 0	
+
+}
+
+
+
+
+function PHASE2(){
+	ROOT_OF_APP="/var/www/${ROOT_FILENAME}"
+	APP_EXEC "mkdir -p /var/www/"
+	APP_EXEC "cp -r /srv/files/${ROOT_FILENAME} /var/www/"
+	APP_EXEC "mkdir -p /srv/security/"
+	APP_EXEC "cp /srv/files/cert.pem /srv/security/"
+	APP_EXEC "cp /srv/files/key.pem /srv/security/"
+	APP_EXEC "cp /srv/files/dhparam.pem /srv/security/"
+	eval "${WEB_SRV^^}_WEB_INIT_CONF"
+	REWRITE_FILE "COMPUTE_VHOST ${CAPABILITIES}" "${VHOST_PATH}"
+	APP_EXEC "rc-update add ${WEB_SRV} default"
+
+
+
+}
+
+function HELPER(){
+	test -e ${LOCAL_MOUNT_ENTRY}||mkdir -p ${LOCAL_MOUNT_ENTRY}
+	local OPTIND
+	local OPTARG
+	shift
+
+
+	HELP="""${HELP}
+	------- WEB Options -------
+	-h		- Show this help
+	-c [file]       - Cert to use as server certs
+	-k [file] 	- Key to use as server Key
+	-s 		- Self signed certificates
+	-t [name]	- Type of usage (php, git, webdav)
+	-m [name]	- Name of the webserver to use (nginx,caddy)
+	-H [name]	- Hostname to append to domain (eg: www for www.hakase.lab )
+	-r [folder]	- Root folder to show off (path).
+	"""
+	while getopts 'hc:k:st:m:H:r:' OPTIONS;do
+		case "${OPTIONS}" in
+			h) echo "${HELP}"; exit 0
+				;;
+			c) CERT=${OPTARG}; CERT_TRIGG=true; DO_SSL=true
+				;;
+			k) KEY=${OPTARG}; KEY_TRIGG=true; DO_SSL=true
+				;;
+			s) SELF_CERT_TRIGG=true; CERT="self_signed"; KEY="none"; DO_SSL=true
+				;;
+			t) TYPE=${OPTARG}; TYPE_TRIGG=true
+				;;
+			m) WEB_SRV=${OPTARG}; WEB_SRV_TRIGG=true
+				;;
+			H) HOSTAME=${OPTARG}; HOSTAME_TRIGG=true
+				;;
+			r) ROOT_FOLDER=${OPTARG}; ROOT_FOLDER_TRIGG=true
+				;;
+			*) echo "Did not understand"; exit 0
+				;;
+		esac
+	done
+	if test $((${OPTIND} -1)) -eq 0;then
+		echo "${HELP}"
+		exit 0
+	fi
+	if test ${TYPE_TRIGG} = true;then
+		for i in ${ALLOWED_TYPES[@]};do
+			FOUND=false
+			if test ${i} = ${TYPE};then
+				debug "Found the corect type: ${i}"
+				local FOUND=true
+				break
+			fi
+		done
+		test ${FOUND} = false && error "Bad seting in type, can't use ${TYPE}"
+	fi
+	FQDN=${HOSTAME}.${DOMAIN}
+	case "${WEB_SRV}" in
+		nginx) debug "Nginx is choosen as the web server"; SENTENCE="server"; VHOST_PATH="/etc/nginx/sites-enabled/main"
+		;;
+		caddy) debug "Caddy is choosen as the web server"; SENTENCE="${FQDN}"; VHOST_PATH="/etc/CaddyFile"
+		;;
+		*) error "Can't use ${WEB_SRV} as a web server"
+		;;
+	esac 
+	DEPENDENCIES="${WEB_SRV} php7-fpm git"
+	if test ${WEB_SRV} = "nginx";then
+		DEPENDENCIES="${DEPENDENCIES} nginx-extra"
+	fi
+	APP_DEPENDENCIES=${APP_DEPENDENCIES}${DEPENDENCIES}
+	test ${ROOT_FOLDER_TRIGG} = true || warn "Root folder is missing, we are goind to serve garbage"
+	if ! test -e ${ROOT_FOLDER};then 
+		warn "Root folder is don't exist, we are goind to serve garbage"
+		ROOT_FOLDER_TRIGG=false
+		test -e ${ROOT_FOLDER} || mkdir -p ${ROOT_FOLDER}
+	fi
+	ROOT_FILENAME=$(basename ${ROOT_FOLDER})
+	if test ${DO_SSL}=true && test ${SELF_CERT_TRIGG} = false;then
+		test ${KEY_TRIGG} = true || error "Key is not set"
+		test ${CERT_TRIGG} = true || error "Cert is not set"
+		CAPABILITIES="${CAPABILITIES} SSL"
+	elif test ${SELF_CERT_TRIGG} = true;then
+		KEY=""
+		if test ${WEB_SRV} = "nginx";then
+			info "Generating self_signed certificates for nginx"
+			openssl req -x509 -new -days 365 -out ${LOCAL_MOUNT_ENTRY}/cert.pem -newkey rsa:2048 -keyout ${LOCAL_MOUNT_ENTRY}/key.pem -subj "/C=AL/ST=M'sila/L=Algeria/O=Kinkazma Network/OU=IT Department/CN=${FQDN}" -nodes 2>&1 | debug
+			if test ${PIPESTATUS[0]} -ne 0;then
+				error "Something went wrong while Generating certs"
+			fi
+			test $? -eq 0 && sucess "Certificat crée" || error "Can't create certs"
+		fi
+		CAPABILITIES="${CAPABILITIES} SSL"
+	fi
+	info "Generating dhparam, may take long time"
+	openssl dhparam -2 -out ${LOCAL_MOUNT_ENTRY}/dhparam.pem -outform pem 1024 2>&1 | debug
+	if test ${PIPESTATUS[0]} -ne 0;then
+		error "Something went wrong while Generating dhparam"
+	fi
+	CAPABILITIES="${CAPABILITIES} ${TYPE}"
+
+
+}
+
+if test ${0} = ${BASH_SOURCE};then
+	echo "Must be run from template."
+	exit 0
+fi
+
+
